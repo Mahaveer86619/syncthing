@@ -1,0 +1,8 @@
+{
+  "vaultPath": "C:\\Users\\you\\Documents\\Obsidian\\MyVault",
+  "remoteUrl": "https://github.com/you/obsidian-notes.git",
+  "branch": "main",
+  "deviceName": "laptop",
+  "debounceSeconds": 15,
+  "pollSeconds": 120
+}
