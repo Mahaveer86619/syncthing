@@ -52,12 +52,12 @@ class ThemePicker extends StatelessWidget {
         children: [
           Text(
             current == null
-                ? 'Dynamic: matches your wallpaper or system accent colour'
+                ? 'Dynamic · from your wallpaper'
                 : ThemeChoice.presets.entries.firstWhere((e) => e.value == current,
                     orElse: () => const MapEntry('Custom', Colors.transparent)).key,
             style: theme.textTheme.titleMedium,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 12,

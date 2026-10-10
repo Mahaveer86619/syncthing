@@ -13,6 +13,8 @@ class Activity {
     this.removed = const [],
     this.conflicts = const [],
     this.message,
+    this.fromCommit,
+    this.toCommit,
   });
 
   factory Activity.fromSummary(SyncSummary s) => Activity(
@@ -22,6 +24,8 @@ class Activity {
         sent: _display(s.sent),
         removed: _display({...s.removedHere, ...s.removedThere}),
         conflicts: _display(s.conflicts),
+        fromCommit: s.fromCommit,
+        toCommit: s.toCommit,
       );
 
   factory Activity.failure(Object error) => Activity(
@@ -37,6 +41,9 @@ class Activity {
   final ActivityKind kind;
   final List<String> received, sent, removed, conflicts;
   final String? message;
+  final String? fromCommit, toCommit;
+
+  bool get hasDiff => fromCommit != null && toCommit != null && fromCommit != toCommit;
 
   List<String> get allFiles => {...received, ...sent, ...removed}.toList()..sort();
 
@@ -91,6 +98,8 @@ class Activity {
         if (removed.isNotEmpty) 'rm': removed,
         if (conflicts.isNotEmpty) 'cf': conflicts,
         if (message != null) 'msg': message,
+        if (fromCommit != null) 'from': fromCommit,
+        if (toCommit != null) 'to': toCommit,
       };
 
   factory Activity.fromJson(Map<String, dynamic> j) {
@@ -103,6 +112,8 @@ class Activity {
       removed: list('rm'),
       conflicts: list('cf'),
       message: j['msg'] as String?,
+      fromCommit: j['from'] as String?,
+      toCommit: j['to'] as String?,
     );
   }
 }

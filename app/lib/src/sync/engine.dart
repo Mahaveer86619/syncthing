@@ -54,6 +54,9 @@ class SyncSummary {
   final conflicts = <String>{};
   final List<String> skipped = [];
 
+  /// Remote commits before and after this sync; their compare view holds the diffs.
+  String? fromCommit, toCommit;
+
   int get downloaded => received.length;
   int get uploaded => sent.length;
   int get deletedLocal => removedHere.length;
@@ -131,9 +134,9 @@ class SyncEngine {
   }
 
   Future<SyncSummary> run() async {
-    final summary = SyncSummary();
+    final summary = SyncSummary()..fromCommit = state.commit;
     for (var attempt = 0; attempt < 3; attempt++) {
-      if (await _pass(summary)) return summary;
+      if (await _pass(summary)) return summary..toCommit = state.commit;
     }
     throw SyncException('Remote kept changing during sync; will retry next time');
   }

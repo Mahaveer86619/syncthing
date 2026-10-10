@@ -309,8 +309,10 @@ class _DesktopSettingsState extends State<DesktopSettings> {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+          // heightFactor 1: a bare Align in bottomNavigationBar takes the whole screen height.
           child: Align(
             alignment: Alignment.centerRight,
+            heightFactor: 1,
             child: FilledButton.icon(
               onPressed: _saving ? null : _save,
               icon: _saving

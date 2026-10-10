@@ -107,6 +107,15 @@ class GitHubRepo implements RemoteRepo {
     };
   }
 
+  /// Unified-diff patch per changed path between two commits (GitHub omits huge/binary ones).
+  Future<Map<String, String>> compare(String base, String head) async {
+    final res = _json(await _send('GET', '/compare/$base...$head'), 'Compare');
+    return {
+      for (final f in (res['files'] as List? ?? const []))
+        if (f['patch'] != null) f['filename'] as String: f['patch'] as String,
+    };
+  }
+
   @override
   Future<List<int>> blob(String sha) async {
     final res = _json(await _send('GET', '/git/blobs/$sha'), 'Blob');

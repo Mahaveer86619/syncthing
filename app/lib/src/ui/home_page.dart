@@ -398,8 +398,31 @@ class _ActivityTile extends StatelessWidget {
   }
 
   void _showDetails(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _DetailsSheet(activity),
+    );
+  }
+}
+
+/// Files of one sync, each expandable to its diff (fetched once from GitHub when opened).
+class _DetailsSheet extends StatefulWidget {
+  const _DetailsSheet(this.activity);
+
+  final Activity activity;
+
+  @override
+  State<_DetailsSheet> createState() => _DetailsSheetState();
+}
+
+class _DetailsSheetState extends State<_DetailsSheet> {
+  late final Future<Map<String, String>> _patches = loadPatches(widget.activity);
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final a = activity;
+    final a = widget.activity;
     final groups = {
       'Sent to GitHub': a.sent,
       'Received': a.received,
@@ -407,14 +430,13 @@ class _ActivityTile extends StatelessWidget {
       'Edited on both sides, both versions kept': a.conflicts,
     }..removeWhere((_, v) => v.isEmpty);
 
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.6,
-        maxChildSize: 0.92,
-        builder: (context, controller) => ListView(
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.6,
+      maxChildSize: 0.92,
+      builder: (context, controller) => FutureBuilder<Map<String, String>>(
+        future: _patches,
+        builder: (context, snap) => ListView(
           controller: controller,
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
           children: [
@@ -429,22 +451,43 @@ class _ActivityTile extends StatelessWidget {
                     style: theme.textTheme.titleSmall
                         ?.copyWith(color: theme.colorScheme.primary)),
               ),
-              for (final path in g.value)
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(path.endsWith('.md')
-                      ? Icons.description_outlined
-                      : Icons.insert_drive_file_outlined),
-                  title: Text(path.split('/').last.replaceFirst(RegExp(r'\.md$'), '')),
-                  subtitle: path.contains('/')
-                      ? Text(path.substring(0, path.lastIndexOf('/')))
-                      : null,
-                ),
+              for (final path in g.value) _FileDiffTile(path, snap),
             ],
           ],
         ),
       ),
+    );
+  }
+}
+
+class _FileDiffTile extends StatelessWidget {
+  const _FileDiffTile(this.path, this.patches);
+
+  final String path;
+  final AsyncSnapshot<Map<String, String>> patches;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final patch = patches.data?[path];
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 12),
+      shape: const Border(),
+      leading: Icon(path.endsWith('.md') ? Icons.description_outlined : Icons.insert_drive_file_outlined),
+      title: Text(path.split('/').last.replaceFirst(RegExp(r'\.md$'), '')),
+      subtitle: path.contains('/') ? Text(path.substring(0, path.lastIndexOf('/'))) : null,
+      children: [
+        if (patches.connectionState != ConnectionState.done)
+          const LinearProgressIndicator()
+        else if (patch != null)
+          DiffView(patch)
+        else
+          Text(
+            patches.hasError ? "Couldn't load the changes (offline?)" : 'No text changes to show',
+            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+      ],
     );
   }
 }

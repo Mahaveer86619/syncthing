@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -258,6 +259,25 @@ class LaptopSync {
     final r = await Process.run('git', ['-C', c.repoPath, 'ls-files', '--', '$notesPrefix*.md']);
     if (r.exitCode != 0) return 0;
     return const LineSplitter().convert('${r.stdout}').where((l) => l.isNotEmpty).length;
+  }
+
+  /// The diff one commit made to one file (vault-relative path), from local history.
+  Future<String> patch(LaptopConfig c, String sha, String path) async {
+    // Commits from before the repo layout stored notes at the root.
+    for (final p in ['$notesPrefix$path', path]) {
+      final r = await Process.run(
+        'git',
+        ['-C', c.repoPath, '-c', 'core.quotepath=false', 'show', '--format=', '--unified=2', sha, '--', p],
+        stdoutEncoding: utf8,
+      );
+      final out = '${r.stdout}';
+      if (out.trim().isNotEmpty) {
+        // Drop the diff/index/---/+++ preamble; keep hunks.
+        final at = out.indexOf('\n@@');
+        return at < 0 ? '' : out.substring(at + 1);
+      }
+    }
+    return '';
   }
 
   /// Recent commits from every device, newest first.

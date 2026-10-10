@@ -6,6 +6,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
@@ -30,14 +33,7 @@ class MainActivity : FlutterActivity() {
                             mapOf("id" to it.id, "greeting" to it.greeting, "emoji" to it.emoji)
                         },
                     )
-                    // Play Services' scanner brings its own camera UI, so the app needs no camera permission.
-                    "scanQr" -> GmsBarcodeScanning.getClient(
-                        this,
-                        GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build(),
-                    ).startScan()
-                        .addOnSuccessListener { result.success(it.rawValue) }
-                        .addOnCanceledListener { result.success(null) }
-                        .addOnFailureListener { result.error("scan", it.message, null) }
+                    "scanQr" -> scanQr(result)
                     "openAutoStart" -> result.success(openAutoStart())
                     // WorkManager's own database still lists work an OEM battery manager deleted,
                     // so ask the system scheduler what is really pending.
@@ -45,6 +41,40 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * Play Services' scanner brings its own camera UI, so the app needs no camera permission.
+     * It is an optional module fetched on demand; scanning before it is on the phone fails
+     * straight away, so make sure it is installed first.
+     */
+    private fun scanQr(result: MethodChannel.Result) {
+        val scanner = GmsBarcodeScanning.getClient(
+            this,
+            GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build(),
+        )
+        val fail = { e: Exception ->
+            Log.w("syncthing", "QR scan failed", e)
+            result.error("scan", e.message ?: e.javaClass.simpleName, null)
+        }
+        val start = {
+            scanner.startScan()
+                .addOnSuccessListener { result.success(it.rawValue) }
+                .addOnCanceledListener { result.success(null) }
+                .addOnFailureListener(fail)
+        }
+        val modules = ModuleInstall.getClient(this)
+        modules.areModulesAvailable(scanner)
+            .addOnSuccessListener { available ->
+                if (available.areModulesAvailable()) {
+                    start()
+                } else {
+                    modules.installModules(ModuleInstallRequest.newBuilder().addApi(scanner).build())
+                        .addOnSuccessListener { start() }
+                        .addOnFailureListener(fail)
+                }
+            }
+            .addOnFailureListener(fail)
     }
 
     /**

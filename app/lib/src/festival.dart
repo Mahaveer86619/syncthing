@@ -21,9 +21,8 @@ class Festival {
   static const _channel = MethodChannel('syncthing/launcher_icon');
 
   static const iconModes = {
-    'auto': ('Dynamic', 'Colourful, and changes by itself for Diwali, Holi, Christmas, '
-        'New Year and national holidays'),
-    'mono': ('Monochrome', 'A quiet grey icon that never changes'),
+    'auto': ('Dynamic', 'Colourful; changes for festivals'),
+    'mono': ('Monochrome', 'Grey; never changes'),
   };
 
   /// Opens the phone maker's auto-start screen; false when it fell back to the app info page.

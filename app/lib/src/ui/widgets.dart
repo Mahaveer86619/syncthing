@@ -103,12 +103,12 @@ class Section extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(left: 8, bottom: 10),
+            padding: const EdgeInsets.only(left: 8, bottom: 12),
             child: Text(
               title,
               style: theme.textTheme.titleSmall?.copyWith(
@@ -259,6 +259,57 @@ class _NextCheckState extends State<NextCheck> {
               backgroundColor: scheme.surfaceContainer,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A unified-diff patch in its simplest readable form: added lines green, removed red,
+/// context dimmed, hunk headers dropped, and cut off after [maxLines].
+class DiffView extends StatelessWidget {
+  const DiffView(this.patch, {super.key, this.maxLines = 30});
+
+  final String patch;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final lines = patch.split('\n').where((l) => !l.startsWith('@@') && !l.startsWith('\\')).toList();
+    final shown = lines.take(maxLines).toList();
+    final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace', height: 1.35);
+    final added = Color.alphaBlend(Colors.green.withValues(alpha: 0.18), scheme.surfaceContainerHighest);
+    final removed = Color.alphaBlend(Colors.red.withValues(alpha: 0.18), scheme.surfaceContainerHighest);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final l in shown)
+            Container(
+              color: l.startsWith('+') ? added : l.startsWith('-') ? removed : null,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
+              child: Text(
+                l.isEmpty ? ' ' : l,
+                style: mono?.copyWith(
+                  color: l.startsWith('+') || l.startsWith('-')
+                      ? scheme.onSurface
+                      : scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          if (lines.length > maxLines)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+              child: Text('… ${lines.length - maxLines} more lines', style: theme.textTheme.labelMedium),
+            ),
         ],
       ),
     );

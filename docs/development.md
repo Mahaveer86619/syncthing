@@ -53,6 +53,8 @@ powershell -ExecutionPolicy Bypass -File tool\install_windows.ps1
 
 Release APKs are signed with the debug key, which is fine for sideloading onto your own phone.
 
+Release builds shrink code with R8 in full mode, which strips the classes ML Kit's QR scanner finds by reflection (symptom: `getClass() on a null object reference` when scanning). `android/app/proguard-rules.pro` keeps them. To read an obfuscated stack trace, look the class names up in `build/app/outputs/mapping/release/mapping.txt`.
+
 Test the background sync against a local bare repo, so you don't need GitHub:
 
 ```powershell

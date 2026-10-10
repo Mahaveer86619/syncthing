@@ -233,7 +233,11 @@ class _DesktopHomeState extends State<DesktopHome> {
                     avatar: const Icon(Icons.open_in_new_rounded, size: 18),
                     label: const Text('Open in Obsidian'),
                     tooltip: config.vaultDir,
-                    onPressed: () => _sync.openInObsidian(config),
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final note = await _sync.openInObsidian(config);
+                      if (note != null) messenger.showSnackBar(SnackBar(content: Text(note)));
+                    },
                   ),
                   Chip(
                     avatar: const Icon(Icons.inventory_2_outlined, size: 18),
@@ -345,7 +349,8 @@ class _DesktopHomeState extends State<DesktopHome> {
                 ?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.w700)),
       ));
       for (var i = 0; i < day.value.length; i++) {
-        rows.add(_CommitTile(day.value[i], first: i == 0, last: i == day.value.length - 1));
+        rows.add(_CommitTile(day.value[i],
+            sync: _sync, config: _config!, first: i == 0, last: i == day.value.length - 1));
       }
     }
     return rows;
@@ -353,9 +358,12 @@ class _DesktopHomeState extends State<DesktopHome> {
 }
 
 class _CommitTile extends StatelessWidget {
-  const _CommitTile(this.commit, {required this.first, required this.last});
+  const _CommitTile(this.commit,
+      {required this.sync, required this.config, required this.first, required this.last});
 
   final Commit commit;
+  final LaptopSync sync;
+  final LaptopConfig config;
   final bool first, last;
 
   @override
@@ -401,7 +409,7 @@ class _CommitTile extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: Text(commit.summary),
         content: SizedBox(
-          width: 520,
+          width: 640,
           child: ListView(
             shrinkWrap: true,
             children: [
@@ -411,9 +419,10 @@ class _CommitTile extends StatelessWidget {
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               const SizedBox(height: 12),
               for (final path in commit.files)
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 12),
+                  shape: const Border(),
                   leading: Icon(path.endsWith('.md')
                       ? Icons.description_outlined
                       : Icons.insert_drive_file_outlined),
@@ -421,6 +430,16 @@ class _CommitTile extends StatelessWidget {
                   subtitle: path.contains('/')
                       ? Text(path.substring(0, path.lastIndexOf('/')))
                       : null,
+                  children: [
+                    FutureBuilder<String>(
+                      future: sync.patch(config, commit.sha, path),
+                      builder: (context, snap) => snap.connectionState != ConnectionState.done
+                          ? const LinearProgressIndicator()
+                          : (snap.data ?? '').isEmpty
+                              ? const Text('No text changes to show')
+                              : DiffView(snap.data!),
+                    ),
+                  ],
                 ),
             ],
           ),

@@ -7,6 +7,7 @@ import 'activity.dart';
 import 'config.dart';
 import 'sync/engine.dart';
 import 'sync/github.dart';
+import 'sync/plan.dart';
 import 'vaults.dart';
 
 const _maxActivities = 100;
@@ -74,6 +75,15 @@ Future<Activity?> runSync({bool ifLocalChanged = false}) async {
 /// The phone's copy of `syncthing-config/` (app-private storage).
 Future<Directory> phoneConfigDir() async =>
     Directory('${(await getApplicationSupportDirectory()).path}/config');
+
+/// Diffs for an activity entry, keyed by vault-relative path. One API call, only when asked.
+Future<Map<String, String>> loadPatches(Activity a) async {
+  if (!a.hasDiff) return {};
+  final c = await SyncConfig.load();
+  final repo = GitHubRepo(owner: c.owner, repo: c.repoName, branch: c.branch, token: c.token);
+  final patches = await repo.compare(a.fromCommit!, a.toCommit!);
+  return {for (final e in patches.entries) displayPath(e.key): e.value};
+}
 
 Future<void> recordRestart() =>
     _record(Activity(time: DateTime.now(), kind: ActivityKind.restarted));

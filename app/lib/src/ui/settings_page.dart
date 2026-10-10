@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../config.dart';
@@ -112,9 +113,10 @@ class _SettingsPageState extends State<SettingsPage> {
       messenger.showSnackBar(SnackBar(content: Text('Paired with ${pairing.repo}. Check the vault, then Save')));
     } on FormatException catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
-    } catch (_) {
-      messenger.showSnackBar(
-          const SnackBar(content: Text("Couldn't open the scanner. Is Google Play Services up to date?")));
+    } on PlatformException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text("Couldn't open the scanner: ${e.message}")));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text("Couldn't open the scanner: $e")));
     }
   }
 
@@ -148,7 +150,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   SliverList.list(children: [
                     Section(
                       title: 'GITHUB',
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
                       children: [
                         FilledButton.tonalIcon(
                           onPressed: _scanPairing,
@@ -156,11 +158,12 @@ class _SettingsPageState extends State<SettingsPage> {
                           label: const Text('Scan pairing code'),
                         ),
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(4, 8, 4, 16),
+                          padding: const EdgeInsets.fromLTRB(4, 10, 4, 24),
                           child: Text(
-                            'Open Settings → Pair your phone in the Windows app and scan its code, '
-                            'or fill these in yourself.',
-                            style: Theme.of(context).textTheme.bodySmall,
+                            'From the Windows app, or fill in below',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                         ),
                         TextFormField(
@@ -175,7 +178,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                   ? null
                                   : 'Use owner/repo',
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         TextFormField(
                           controller: _branch,
                           decoration: const InputDecoration(
@@ -184,13 +187,13 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           validator: _required,
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         TextFormField(
                           controller: _token,
                           obscureText: !_showToken,
                           decoration: InputDecoration(
                             labelText: 'Access token',
-                            helperText: 'Fine-grained token · Contents: read & write on this repo',
+                            helperText: 'Contents: read & write',
                             prefixIcon: const Icon(Icons.key_rounded),
                             suffixIcon: IconButton(
                               icon: Icon(_showToken
@@ -205,12 +208,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     Section(
                       title: 'VAULT',
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
                       children: [
                         if (_vaults.isNotEmpty) ...[
                           Text('Found on this phone',
                               style: Theme.of(context).textTheme.labelLarge),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 12),
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
@@ -224,7 +227,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 ),
                             ],
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 20),
                         ],
                         TextFormField(
                           controller: _vault,
@@ -249,13 +252,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     Section(
                       title: 'THIS PHONE',
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
                       children: [
                         TextFormField(
                           controller: _device,
                           decoration: const InputDecoration(
                             labelText: 'Device name',
-                            helperText: 'Starts every commit from this phone, e.g. "phone: 2 added"',
+                            helperText: 'Shown in commit messages',
                             prefixIcon: Icon(Icons.smartphone_rounded),
                           ),
                           validator: _required,
@@ -269,31 +272,35 @@ class _SettingsPageState extends State<SettingsPage> {
                           icon: Icons.folder_special_rounded,
                           title: 'Storage access',
                           granted: _storageGranted,
-                          grantedText: 'Can read and write your vault',
-                          neededText: 'Needed to read and write your vault',
+                          grantedText: 'Vault folder is reachable',
+                          neededText: 'Needed for your vault folder',
                           onGrant: _requestStorage,
                         ),
                         _PermissionTile(
                           icon: Icons.battery_charging_full_rounded,
                           title: 'Unrestricted battery',
                           granted: _batteryUnrestricted,
-                          grantedText: 'Background syncs run on time',
-                          neededText: "So Android doesn't postpone auto sync",
+                          grantedText: 'Syncs run on time',
+                          neededText: 'Stops Android delaying syncs',
                           onGrant: _requestBattery,
                         ),
                         ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
                           leading: const TonalIcon(Icons.rocket_launch_rounded),
                           title: Text('Auto-start',
                               style: Theme.of(context).textTheme.titleMedium),
-                          subtitle: const Text(
-                              'Some phones (Infinix, Xiaomi, Oppo, Vivo) stop background syncing when '
-                              'you swipe the app away. Allow Syncthing to auto-start there, and lock it '
-                              'in Recents.'),
-                          isThreeLine: true,
+                          subtitle: const Text('Keeps syncing after swipe-away'),
                           trailing: FilledButton.tonal(
                             onPressed: Festival.openAutoStart,
                             child: const Text('Open'),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                          child: Text(
+                            'On Infinix, Xiaomi, Oppo and Vivo, also lock Syncthing in Recents.',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
                           ),
                         ),
                       ],
@@ -354,7 +361,7 @@ class _PermissionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
       leading: TonalIcon(
         granted ? Icons.check_rounded : icon,
         color: granted ? scheme.primaryContainer : scheme.errorContainer,
