@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -172,4 +173,94 @@ String dayLabel(DateTime t) {
   if (diff == 1) return 'Yesterday';
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return '${months[t.month - 1]} ${t.day}${t.year == now.year ? '' : ', ${t.year}'}';
+}
+
+/// Live countdown to the next background check. Ticks only while this screen is visible.
+class NextCheck extends StatefulWidget {
+  const NextCheck(
+    this.next, {
+    super.key,
+    required this.interval,
+    required this.onOverdue,
+    this.label = 'Next check for laptop changes',
+  });
+
+  final DateTime next;
+  final Duration interval;
+  final String label;
+
+  /// Called every 15 s while overdue, to pick up a background check that just ran.
+  final Future<void> Function() onOverdue;
+
+  @override
+  State<NextCheck> createState() => _NextCheckState();
+}
+
+class _NextCheckState extends State<NextCheck> {
+  // Started eagerly in initState: a `late` field initialiser would only run on first read.
+  late final Timer _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() {});
+      if (t.tick % 15 == 0 && widget.next.isBefore(DateTime.now())) widget.onOverdue();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final left = widget.next.difference(DateTime.now());
+    final overdue = left.inSeconds <= 0;
+    final progress = overdue
+        ? 1.0
+        : 1 - left.inMilliseconds / widget.interval.inMilliseconds;
+    final mm = left.inMinutes.toString().padLeft(2, '0');
+    final ss = (left.inSeconds % 60).toString().padLeft(2, '0');
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.label,
+              style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 2),
+          Text(
+            overdue ? 'Any moment now' : '$mm:$ss',
+            style: (overdue ? theme.textTheme.headlineSmall : theme.textTheme.displayMedium)
+                ?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: scheme.primary,
+              height: 1.1,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              minHeight: 10,
+              backgroundColor: scheme.surfaceContainer,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

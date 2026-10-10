@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../activity.dart';
@@ -7,6 +5,7 @@ import '../config.dart';
 import '../festival.dart';
 import '../runner.dart';
 import '../schedule.dart';
+import 'theme_choice.dart';
 import 'settings_page.dart';
 import 'widgets.dart';
 
@@ -41,7 +40,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _reload();
+    if (state != AppLifecycleState.resumed) return;
+    // Resuming a frozen process skips initState, so the schedule is checked here too.
+    _healSchedule();
+    _reload();
+  }
+
+  Future<void> _healSchedule() async {
+    final config = _config ?? await SyncConfig.load();
+    if (!config.isComplete || !config.autoSync) return;
+    if (await ensureSchedule()) {
+      await recordRestart();
+      await _reload();
+    }
   }
 
   Future<void> _init() async {
@@ -49,12 +60,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     Festival.today().then((f) => mounted ? setState(() => _festival = f) : null);
     final config = _config!;
     if (!config.isComplete) return;
-    // Re-registering is idempotent and heals schedules lost to "force stop" or an app update.
-    await applySchedule(config.autoSync);
+    config.autoSync ? await _healSchedule() : await applySchedule(false);
     await _sync();
   }
 
   Future<void> _reload() async {
+    await ThemeChoice.load();
     final config = await SyncConfig.load();
     final activity = await readActivity();
     final last = await lastCheck();
@@ -96,7 +107,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool get _failing {
     final latest = _activity.isEmpty ? null : _activity.first;
     return latest != null &&
-        latest.kind != ActivityKind.synced &&
+        (latest.kind == ActivityKind.error || latest.kind == ActivityKind.offline) &&
         (_lastCheck == null || latest.time.isAfter(_lastCheck!));
   }
 
@@ -203,7 +214,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
               if (config.autoSync && _nextPoll != null) ...[
                 const SizedBox(height: 16),
-                _NextCheck(_nextPoll!, onOverdue: _reload),
+                NextCheck(_nextPoll!, interval: pollInterval, onOverdue: _reload),
               ],
               const SizedBox(height: 16),
               SizedBox(
@@ -337,88 +348,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-/// Live countdown to the next background check. Ticks only while this screen is visible.
-class _NextCheck extends StatefulWidget {
-  const _NextCheck(this.next, {required this.onOverdue});
-
-  final DateTime next;
-
-  /// Called every 15 s while overdue, to pick up a background check that just ran.
-  final Future<void> Function() onOverdue;
-
-  @override
-  State<_NextCheck> createState() => _NextCheckState();
-}
-
-class _NextCheckState extends State<_NextCheck> {
-  // Started eagerly in initState: a `late` field initialiser would only run on first read.
-  late final Timer _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return;
-      setState(() {});
-      if (t.tick % 15 == 0 && widget.next.isBefore(DateTime.now())) widget.onOverdue();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final left = widget.next.difference(DateTime.now());
-    final overdue = left.inSeconds <= 0;
-    final progress = overdue
-        ? 1.0
-        : 1 - left.inMilliseconds / pollInterval.inMilliseconds;
-    final mm = left.inMinutes.toString().padLeft(2, '0');
-    final ss = (left.inSeconds % 60).toString().padLeft(2, '0');
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Next check for laptop changes',
-              style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant)),
-          const SizedBox(height: 2),
-          Text(
-            overdue ? 'Any moment now' : '$mm:$ss',
-            style: (overdue ? theme.textTheme.headlineSmall : theme.textTheme.displayMedium)
-                ?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: scheme.primary,
-              height: 1.1,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              value: progress.clamp(0.0, 1.0),
-              minHeight: 10,
-              backgroundColor: scheme.surfaceContainer,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ActivityTile extends StatelessWidget {
   const _ActivityTile(this.activity, {required this.first, required this.last});
 
@@ -441,6 +370,7 @@ class _ActivityTile extends StatelessWidget {
         (Icons.south_rounded, scheme.secondaryContainer, scheme.onSecondaryContainer),
       ActivityKind.synced => (Icons.sync_alt_rounded, scheme.primaryContainer, scheme.onPrimaryContainer),
       ActivityKind.offline => (Icons.cloud_off_rounded, scheme.surfaceContainerHighest, scheme.onSurfaceVariant),
+      ActivityKind.restarted => (Icons.restart_alt_rounded, scheme.tertiaryContainer, scheme.onTertiaryContainer),
       ActivityKind.error => (Icons.priority_high_rounded, scheme.errorContainer, scheme.onErrorContainer),
     };
     const outer = Radius.circular(24), inner = Radius.circular(6);

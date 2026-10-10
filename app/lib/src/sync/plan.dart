@@ -1,3 +1,11 @@
+/// Where the repo's notes and shared app settings live; anything else in the repo is left alone.
+const notesPrefix = 'obsidian-notes/';
+const configPrefix = 'syncthing-config/';
+
+/// Repo path as people think of it: notes relative to the vault.
+String displayPath(String path) =>
+    path.startsWith(notesPrefix) ? path.substring(notesPrefix.length) : path;
+
 enum ActionKind { download, upload, deleteLocal, deleteRemote, conflict }
 
 class SyncAction {
@@ -74,7 +82,7 @@ class CommitMessage {
 
   void _add(String kind, String code, String path) {
     _counts[kind] = (_counts[kind] ?? 0) + 1;
-    _files.add('$code $path');
+    _files.add('$code ${displayPath(path)}');
   }
 
   @override

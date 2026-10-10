@@ -1,6 +1,7 @@
 import 'sync/engine.dart';
+import 'sync/plan.dart';
 
-enum ActivityKind { synced, error, offline }
+enum ActivityKind { synced, error, offline, restarted }
 
 /// One line of the activity feed, stored as a JSON line in the app's private log file.
 class Activity {
@@ -17,10 +18,10 @@ class Activity {
   factory Activity.fromSummary(SyncSummary s) => Activity(
         time: DateTime.now(),
         kind: ActivityKind.synced,
-        received: s.received.toList()..sort(),
-        sent: s.sent.toList()..sort(),
-        removed: ({...s.removedHere, ...s.removedThere}.toList())..sort(),
-        conflicts: s.conflicts.toList()..sort(),
+        received: _display(s.received),
+        sent: _display(s.sent),
+        removed: _display({...s.removedHere, ...s.removedThere}),
+        conflicts: _display(s.conflicts),
       );
 
   factory Activity.failure(Object error) => Activity(
@@ -28,6 +29,9 @@ class Activity {
         kind: error.toString().contains('SocketException') ? ActivityKind.offline : ActivityKind.error,
         message: error.toString(),
       );
+
+  static List<String> _display(Iterable<String> paths) =>
+      paths.map(displayPath).toList()..sort();
 
   final DateTime time;
   final ActivityKind kind;
@@ -38,6 +42,8 @@ class Activity {
 
   String get title {
     switch (kind) {
+      case ActivityKind.restarted:
+        return 'Auto sync restarted';
       case ActivityKind.offline:
         return 'Waiting for internet';
       case ActivityKind.error:
@@ -51,6 +57,8 @@ class Activity {
 
   String get subtitle {
     switch (kind) {
+      case ActivityKind.restarted:
+        return "Your phone's battery manager had stopped it. Lock Syncthing in Recents to prevent this";
       case ActivityKind.offline:
         return "Will sync when you're back online";
       case ActivityKind.error:

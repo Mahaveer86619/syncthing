@@ -8,17 +8,17 @@ param([switch]$Uninstall)
 
 $ErrorActionPreference = 'Stop'
 $lnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'syncthing-vault-sync.lnk'
+$script = Join-Path $PSScriptRoot 'sync.ps1'
 
 if ($Uninstall) {
     if (Test-Path $lnk) { Remove-Item $lnk }
     Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
-        Where-Object { $_.CommandLine -like '*laptop-sync*sync.ps1*' } |
+        Where-Object { $_.CommandLine -like "*$script*" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId }
     Write-Host 'Removed startup entry and stopped the running sync.'
     return
 }
 
-$script = Join-Path $PSScriptRoot 'sync.ps1'
 if (-not (Test-Path (Join-Path $PSScriptRoot 'config.json'))) { throw 'Create config.json first (see config.example.json).' }
 
 # conhost --headless runs the console app with no window at all, not even a flash.

@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'runner.dart';
@@ -10,6 +11,21 @@ const pollTask = 'vault-poll';
 const watchTask = 'vault-watch';
 
 const _filesUri = 'content://media/external/file';
+
+const _native = MethodChannel('syncthing/launcher_icon');
+
+/// Some phone makers' battery managers (Infinix XOS, MIUI...) delete an app's scheduled jobs on
+/// swipe-away or when its launcher icon changes. Rebuilds the schedule if that happened and
+/// returns true so the user can be told.
+Future<bool> ensureSchedule() async {
+  final pending = await _native.invokeMethod<int>('pendingJobs') ?? 0;
+  // Poll + edit watch + launcher-icon check; fewer means some were deleted.
+  if (pending >= 3) return false;
+  await Workmanager().cancelByUniqueName(pollTask);
+  await Workmanager().cancelByUniqueName(watchTask);
+  await applySchedule(true);
+  return true;
+}
 
 Future<void> applySchedule(bool autoSync) async {
   if (!autoSync) {

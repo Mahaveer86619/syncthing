@@ -8,6 +8,8 @@ import androidx.work.PeriodicWorkRequest
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import org.json.JSONObject
+import java.io.File
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
@@ -46,12 +48,16 @@ object Festivals {
 object LauncherIcon {
     val icons = listOf("default", "mono", "diwali", "holi", "christmas", "newyear", "tricolor")
 
-    private fun prefs(ctx: Context) = ctx.getSharedPreferences("launcher_icon", Context.MODE_PRIVATE)
-
-    /** "auto" (Dynamic) follows the festival calendar; "mono" pins the grey icon. */
-    fun mode(ctx: Context): String = prefs(ctx).getString("mode", "auto") ?: "auto"
-
-    fun setMode(ctx: Context, mode: String) = prefs(ctx).edit().putString("mode", mode).apply()
+    /**
+     * "auto" (Dynamic) follows the festival calendar; "mono" pins the grey icon. Read from the
+     * synced settings file (Flutter's app-support dir is filesDir), so a change made on another
+     * device applies here too.
+     */
+    fun mode(ctx: Context): String = try {
+        JSONObject(File(ctx.filesDir, "config/settings.json").readText()).optString("appIcon", "auto")
+    } catch (e: Exception) {
+        "auto"
+    }
 
     private fun wanted(ctx: Context): String {
         val mode = mode(ctx)
@@ -81,7 +87,8 @@ object LauncherIcon {
     fun schedule(ctx: Context) {
         val request = PeriodicWorkRequest.Builder(IconWorker::class.java, 12, TimeUnit.HOURS).build()
         WorkManager.getInstance(ctx)
-            .enqueueUniquePeriodicWork("launcher-icon", ExistingPeriodicWorkPolicy.KEEP, request)
+            // UPDATE (not KEEP) re-inserts the job if a battery manager deleted it behind WorkManager's back.
+            .enqueueUniquePeriodicWork("launcher-icon", ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 }
 

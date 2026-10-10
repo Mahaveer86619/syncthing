@@ -1,41 +1,38 @@
 # syncthing
 
-Two-way sync for an [Obsidian](https://obsidian.md) vault between a Windows laptop and an Android phone, using a **private GitHub repo** as the always-on hub. No server, no VM, no subscription.
+Two-way sync for an [Obsidian](https://obsidian.md) vault between a Windows PC and an Android phone, using a **private GitHub repo** as the always-on hub. No server, no VM, no subscription.
 
 ```
- ┌──────────────┐        git push/pull        ┌─────────────────────┐      GitHub REST API      ┌──────────────┐
- │ Laptop vault │ ──────────────────────────▶ │ private notes repo  │ ◀──────────────────────── │ Android vault│
- │ (git clone)  │ ◀────────────────────────── │  (GitHub = the hub) │ ────────────────────────▶ │ (plain files)│
- └──────────────┘   laptop-sync/sync.ps1      └─────────────────────┘     app/ (Flutter)         └──────────────┘
+ ┌──────────────┐     git (your SSH/HTTPS login)    ┌──────────────────────┐      GitHub REST API      ┌──────────────┐
+ │ Windows app  │ ────────────────────────────────▶ │  private notes repo  │ ◀──────────────────────── │ Android app  │
+ │ + background │ ◀──────────────────────────────── │  obsidian-notes/     │ ────────────────────────▶ │ (no git, no  │
+ │   sync       │                                   │  syncthing-config/   │                           │  resident    │
+ └──────────────┘                                   └──────────────────────┘                           │  process)    │
+                                                                                                       └──────────────┘
 ```
 
-- **`laptop-sync/`**: a PowerShell script that watches the vault, commits edits about 15 s after you stop typing, pulls remote changes every 2 min, and pushes. It runs hidden at logon with no window and idles at ~0% CPU.
-- **`app/`**: a small Flutter Android app. It syncs the phone's vault folder with the same repo through the GitHub API (no git needed on the phone). With **Auto sync** on, Android wakes it right after you edit a note and every 15 min to pull laptop changes. Nothing stays resident in memory, and an idle check costs one API call or none.
+One Flutter codebase (`app/`) builds both apps:
 
-Every sync makes one brief commit that says who and what, e.g. `phone: 1 added, 2 modified` followed by the file list.
+- **Windows**: a Material 3 control panel with status, a live countdown, Sync now, Auto sync, activity from both devices, Open in Obsidian, and a phone pairing QR code. The syncing runs in a tiny background process (bundled `sync.ps1` driving git) that starts at login and keeps running after you close the window.
+- **Android**: syncs the phone's vault through the GitHub API. Android wakes it right after you edit a note and every 15 min to pull PC changes. Nothing stays resident in memory, and an idle check costs one API call or none.
 
-Conflicts never lose data: if both sides edited the same note, your local version stays and the other one is saved beside it as `note (conflict 2026-10-10 153012).md`.
+Theme and app icon live in the repo (`syncthing-config/settings.json`), so changing them on one device changes them on the other. The Android launcher icon can also switch for Diwali, Holi, Christmas, New Year and national holidays.
+
+Every sync makes one brief commit that says which device and what changed, e.g. `phone: 1 added, 2 modified`, with the GitHub account as author. Conflicts never lose data: both versions are kept.
 
 ## Quick start
 
-1. **Notes repo**: create a private repo (e.g. `obsidian-notes`) with a README, and a fine-grained token for the phone. See [docs/notes-repo-setup.md](docs/notes-repo-setup.md).
-2. **Laptop**:
-   ```powershell
-   cd laptop-sync
-   copy config.example.json config.json   # set vaultPath + remoteUrl
-   .\sync.ps1 -Init                        # one-time: attach vault to the repo
-   .\install-startup.ps1                   # run silently at every logon
-   ```
-   Details: [docs/laptop-sync.md](docs/laptop-sync.md).
-3. **Phone**: build/install the APK, then fill in repo, token and vault folder in Settings. See [docs/android-app.md](docs/android-app.md).
+1. Create a private notes repo (e.g. `obsidian-notes`), see [docs/notes-repo-setup.md](docs/notes-repo-setup.md).
+2. **Windows**: build and install the app ([docs/windows-app.md](docs/windows-app.md)), then pick a sync folder and paste the repo URL. Open `<sync folder>\obsidian-notes` in Obsidian.
+3. **Android**: install the APK, then Settings → **Scan pairing code** and scan the QR the Windows app shows. Pick your vault folder and Save ([docs/android-app.md](docs/android-app.md)).
 
 ## Docs
 
-See [docs/README.md](docs/README.md) for architecture, the sync algorithm, development setup and the roadmap.
+See [docs/README.md](docs/README.md).
 
 ## Not affiliated
 
-This is a personal project and is unrelated to the [Syncthing](https://syncthing.net) P2P file-sync tool.
+A personal project, unrelated to the [Syncthing](https://syncthing.net) P2P file-sync tool.
 
 ## License
 

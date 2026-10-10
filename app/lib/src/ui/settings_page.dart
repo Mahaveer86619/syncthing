@@ -4,8 +4,10 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../config.dart';
 import '../festival.dart';
+import '../pairing.dart';
 import '../schedule.dart';
 import '../vaults.dart';
+import 'theme_choice.dart';
 import 'widgets.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -97,6 +99,25 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Future<void> _scanPairing() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final pairing = Pairing.parse(await Festival.scanQr());
+      if (pairing == null) return;
+      setState(() {
+        _repo.text = pairing.repo;
+        _branch.text = pairing.branch;
+        _token.text = pairing.token;
+      });
+      messenger.showSnackBar(SnackBar(content: Text('Paired with ${pairing.repo}. Check the vault, then Save')));
+    } on FormatException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text("Couldn't open the scanner. Is Google Play Services up to date?")));
+    }
+  }
+
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     await SyncConfig(
@@ -129,6 +150,19 @@ class _SettingsPageState extends State<SettingsPage> {
                       title: 'GITHUB',
                       padding: const EdgeInsets.all(16),
                       children: [
+                        FilledButton.tonalIcon(
+                          onPressed: _scanPairing,
+                          icon: const Icon(Icons.qr_code_scanner_rounded),
+                          label: const Text('Scan pairing code'),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 8, 4, 16),
+                          child: Text(
+                            'Open Settings → Pair your phone in the Windows app and scan its code, '
+                            'or fill these in yourself.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
                         TextFormField(
                           controller: _repo,
                           decoration: const InputDecoration(
@@ -247,8 +281,24 @@ class _SettingsPageState extends State<SettingsPage> {
                           neededText: "So Android doesn't postpone auto sync",
                           onGrant: _requestBattery,
                         ),
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          leading: const TonalIcon(Icons.rocket_launch_rounded),
+                          title: Text('Auto-start',
+                              style: Theme.of(context).textTheme.titleMedium),
+                          subtitle: const Text(
+                              'Some phones (Infinix, Xiaomi, Oppo, Vivo) stop background syncing when '
+                              'you swipe the app away. Allow Syncthing to auto-start there, and lock it '
+                              'in Recents.'),
+                          isThreeLine: true,
+                          trailing: FilledButton.tonal(
+                            onPressed: Festival.openAutoStart,
+                            child: const Text('Open'),
+                          ),
+                        ),
                       ],
                     ),
+                    const ThemePicker(),
                     Section(
                       title: 'APP ICON',
                       children: [

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:syncthing/src/sync/engine.dart';
 import 'package:syncthing/src/sync/github.dart';
+import 'package:syncthing/src/sync/ignore.dart';
 
 class FakeRemote implements RemoteRepo {
   final blobs = <String, List<int>>{};
@@ -86,14 +87,14 @@ void main() {
   }
 
   Future<SyncSummary> sync() => SyncEngine(
-        vault: vault,
+        roots: [SyncRoot('', vault, ignore: IgnoreRules.fromGitignore(null))],
         remote: remote,
         state: state,
         deviceName: 'test',
         clock: () => DateTime(2026, 1, 2, 3, 4, 5),
       ).run();
 
-  SyncEngine engine() => SyncEngine(vault: vault, remote: remote, state: state, deviceName: 'test');
+  SyncEngine engine() => SyncEngine(roots: [SyncRoot('', vault, ignore: IgnoreRules.fromGitignore(null))], remote: remote, state: state, deviceName: 'test');
 
   test('local change check needs no network and spots edits, adds and deletes', () async {
     remote.put('a.md', '1');
@@ -171,5 +172,34 @@ void main() {
     await sync();
     expect(remote.read('mine.md'), 'x');
     expect(await f('race.md').readAsString(), 'pushed by someone else');
+  });
+
+  test('repo layout: notes and settings map to their folders, other files are left alone', () async {
+    final cfg = await Directory.systemTemp.createTemp('cfg');
+    addTearDown(() => cfg.delete(recursive: true));
+    remote.put('README.md', 'about');
+    remote.put('obsidian-notes/a.md', 'note');
+    remote.put('syncthing-config/settings.json', '{}');
+    final e = SyncEngine(
+      roots: [
+        SyncRoot('obsidian-notes/', vault, ignore: IgnoreRules.fromGitignore(null)),
+        SyncRoot('syncthing-config/', cfg),
+      ],
+      remote: remote,
+      state: state,
+      deviceName: 'test',
+    );
+    await e.run();
+    expect(await f('a.md').readAsString(), 'note');
+    expect(await File('${cfg.path}/settings.json').readAsString(), '{}');
+    expect(await f('README.md').exists(), isFalse);
+
+    await write('new.md', 'x');
+    await File('${cfg.path}/settings.json').writeAsString('{"theme":"dynamic"}');
+    await e.run();
+    expect(remote.read('obsidian-notes/new.md'), 'x');
+    expect(remote.read('syncthing-config/settings.json'), '{"theme":"dynamic"}');
+    expect(remote.read('README.md'), 'about');
+    expect(remote.lastMessage, startsWith('test: 1 added, 1 modified\n\nA new.md'));
   });
 }

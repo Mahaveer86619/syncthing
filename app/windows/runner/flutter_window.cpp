@@ -1,6 +1,10 @@
 #include "flutter_window.h"
 
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
+
 #include <optional>
+#include <string>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -25,6 +29,25 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+
+  // Lets Dart swap the window/taskbar icon when the shared "app icon" setting changes.
+  window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "syncthing/window",
+      &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    const auto* path = std::get_if<std::string>(call.arguments());
+    if (call.method_name() != "setIcon" || path == nullptr) {
+      result->NotImplemented();
+      return;
+    }
+    std::wstring wide(path->begin(), path->end());
+    for (int which : {ICON_BIG, ICON_SMALL}) {
+      int size = GetSystemMetrics(which == ICON_BIG ? SM_CXICON : SM_CXSMICON);
+      HANDLE icon = LoadImageW(nullptr, wide.c_str(), IMAGE_ICON, size, size, LR_LOADFROMFILE);
+      if (icon != nullptr) SendMessage(GetHandle(), WM_SETICON, which, reinterpret_cast<LPARAM>(icon));
+    }
+    result->Success();
+  });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

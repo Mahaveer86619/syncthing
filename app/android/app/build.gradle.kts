@@ -51,4 +51,5 @@ flutter {
 dependencies {
     // Same version workmanager_android bundles; used by the native launcher-icon worker.
     implementation("androidx.work:work-runtime:2.11.2")
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 }

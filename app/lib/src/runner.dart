@@ -41,7 +41,7 @@ Future<Activity?> runSync({bool ifLocalChanged = false}) async {
     final stateFile = File('${dir.path}/state.json');
     final state = await _loadState(stateFile, config.stateKey);
     final engine = SyncEngine(
-      vault: vault,
+      roots: await SyncEngine.standardRoots(vault, await phoneConfigDir()),
       remote: GitHubRepo(
         owner: config.owner,
         repo: config.repoName,
@@ -70,6 +70,13 @@ Future<Activity?> runSync({bool ifLocalChanged = false}) async {
     await lock.delete();
   }
 }
+
+/// The phone's copy of `syncthing-config/` (app-private storage).
+Future<Directory> phoneConfigDir() async =>
+    Directory('${(await getApplicationSupportDirectory()).path}/config');
+
+Future<void> recordRestart() =>
+    _record(Activity(time: DateTime.now(), kind: ActivityKind.restarted));
 
 Future<void> _saveState(File f, String key, SyncState state) =>
     f.writeAsString(jsonEncode({'key': key, ...state.toJson()}));

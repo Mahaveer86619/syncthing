@@ -1,5 +1,4 @@
-laptop-sync/config.json
-laptop-sync/logs/
 .idea/
 .vscode/
 *.iml
+.claude/settings.local.json

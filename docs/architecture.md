@@ -2,35 +2,48 @@
 
 ## Why GitHub as the hub (and no VM)
 
-Two-way sync needs a place both devices can reach whenever they're online. A private GitHub repo already is that place: always up, free, versioned, and reachable from both a laptop and a phone. Each device syncs *with GitHub*, never directly with each other, so it doesn't matter whether the other device is on.
+Two-way sync needs a place both devices can reach whenever they're online. A private GitHub repo already is that place: always up, free, versioned, and reachable from a PC and a phone. Each device syncs *with GitHub*, never directly with the other, so it doesn't matter whether the other device is on.
 
-A VM (or a peer-to-peer tool) would only add value if you needed real-time sync between two devices that are both online, or wanted the data off GitHub. For notes, "within a few minutes" is enough, and every change also lands in git history as a free backup.
+A VM (or a peer-to-peer tool) only adds value if you need real-time sync between two devices that are both online, or want the data off GitHub. For notes, "within a few minutes" is enough, and every change also lands in git history as a free backup.
 
 What you give up:
 
-- **Latency.** Laptop → GitHub takes about 15 s after you stop typing. Phone → GitHub happens shortly after Obsidian saves (edit trigger). GitHub → phone takes up to 15 min (Android's minimum periodic interval), or is instant with *Sync now*.
-- **Privacy.** Notes are stored on GitHub (private repo). Encrypting them is on the [roadmap](plan.md).
+- **Latency.** PC → GitHub takes about 15 s after you stop typing. Phone → GitHub happens shortly after Obsidian saves. GitHub → phone takes up to 15 min (Android's minimum periodic interval), or is instant with *Sync now*. GitHub → PC takes up to 2 min by default.
+- **Privacy.** Notes are stored on GitHub in a private repo. Client-side encryption is on the [roadmap](plan.md).
+
+## Repo layout
+
+```
+obsidian-notes/          the Obsidian vault (with its own .gitignore)
+syncthing-config/
+    settings.json        settings shared by every device
+README.md, ...           anything else at the root is never touched
+```
+
+`settings.json` holds `theme` (`dynamic` or `#RRGGBB`) and `appIcon` (`auto` or `mono`). It syncs like any note, so a theme or icon change on one device reaches the other on its next sync. Per-device things (sync folder, vault path, intervals, device name, tokens) stay on the device.
+
+The Windows background sync creates this layout on a new repo. A repo from before the layout existed (vault at the root) is reorganised in one commit when the Windows app first connects, so history is kept as renames.
 
 ## Components
 
 | Component | Where | How it talks to GitHub | Local state |
 | --- | --- | --- | --- |
-| `laptop-sync/sync.ps1` | Windows laptop | `git` CLI over SSH or HTTPS (your existing git credentials) | The vault folder *is* a git clone |
-| `app/` (Flutter) | Android | GitHub REST *Git Data* API with a fine-grained token | `state.json` in app-private storage; the vault stays plain files |
+| Windows app (`app/`, `lib/src/desktop/`) | PC | Doesn't. It drives the background sync and reads its status and git history | `%LOCALAPPDATA%\Syncthing` |
+| Background sync (`app/assets/sync/sync.ps1`) | PC, started at login | `git` over your SSH key or Git Credential Manager | The sync folder is a git clone |
+| Android app (`app/`, `lib/src/sync/`) | Phone | GitHub REST *Git Data* API with a fine-grained token | `state.json` and its `syncthing-config/` copy in app-private storage; the vault stays plain files |
 
-Both write ordinary commits to the same branch in one brief format: `<device>: 1 added, 2 modified`, plus a body listing up to 10 files. The commit author is the GitHub account that pushed: your git identity on the laptop, the token owner on the phone.
-
-## Laptop flow
+## PC flow
 
 ```
-FileSystemWatcher event ──▶ wait for 15 s of quiet ──▶ git add -A / commit
-                                                        └─▶ fetch ─▶ merge (keep-both on conflict) ─▶ push
-every 2 min ──▶ same, even with no local edits (pulls phone changes)
+FileSystemWatcher event ──▶ 15 s of quiet ──▶ git add -A / commit
+                                              └─▶ fetch ─▶ merge (keep both on conflict) ─▶ push
+every 2 min, or "Sync now" in the app ──▶ the same, even with no local edits (pulls phone changes)
 ```
 
 - A local-edit sync with nothing to push makes no network call.
-- A rejected push (the phone pushed in between) is retried up to 3 times: fetch, merge, push.
-- Git does a real line-level merge, so edits to different parts of the same note combine cleanly. Only overlapping edits become conflict copies.
+- A rejected push (the phone pushed in between) is retried up to 3 times.
+- Git does a real line-level merge, so edits to different parts of a note combine cleanly. Only overlapping edits become conflict copies.
+- The app talks to the background process through files in `%LOCALAPPDATA%\Syncthing`: `logs\status.json` (last result), `logs\last_poll` (for the countdown), `logs\daemon.pid` (is it running) and a `sync-now` request file.
 
 ## Phone triggers
 
@@ -40,15 +53,15 @@ Obsidian saves a file ──▶ MediaStore change ──▶ WorkManager content 
 every 15 min ──▶ WorkManager periodic job ──▶ full sync (1 API call if remote unchanged)
 ```
 
-No foreground service and no resident process. See [android-app.md](android-app.md#auto-sync).
+No foreground service and no resident process. Some phone makers' battery managers delete these jobs when the app is swiped away; see [android-app.md](android-app.md#phones-that-kill-background-work).
 
-## Phone flow (sync engine)
+## Phone sync engine
 
-The phone does not run git. `app/lib/src/sync/engine.dart` does a three-way comparison of `path → git blob SHA` maps:
+The phone does not run git. `lib/src/sync/engine.dart` mirrors repo folders to local folders (`obsidian-notes/` ↔ the vault, `syncthing-config/` ↔ app storage) and does a three-way comparison of `path → git blob SHA` maps:
 
-- **base**: what both sides agreed on at the end of the last sync (saved in `state.json`)
-- **local**: the vault folder now (SHA cached by size + mtime, so unchanged files aren't re-read)
-- **remote**: the branch's tree on GitHub (skipped entirely if the branch head hasn't moved, so an idle poll costs **1 API call**)
+- **base**: what both sides agreed on at the end of the last sync (`state.json`)
+- **local**: the folders now (SHA cached by size + mtime, so unchanged files aren't re-read)
+- **remote**: the branch's tree on GitHub (skipped entirely if the branch head hasn't moved)
 
 | local vs base | remote vs base | Action |
 | --- | --- | --- |
@@ -59,28 +72,43 @@ The phone does not run git. `app/lib/src/sync/engine.dart` does a three-way comp
 | changed | changed, different | **conflict**: keep local, save remote as `name (conflict <time>).ext` on both sides |
 | equal to remote | – | nothing |
 
-Uploads become one commit: create blobs, a tree based on the remote tree, a commit, then a fast-forward-only ref update. If another device pushed in between, the ref update is rejected and the whole pass reruns (downloads already applied are idempotent).
+Uploads become one commit: create blobs, a tree based on the remote tree (so files outside the mirrored folders are untouched), a commit, then a fast-forward-only ref update. If another device pushed in between, the update is rejected and the pass reruns.
 
-On the first sync (empty base), files that exist on both sides with different content become conflicts rather than being overwritten.
+On a first sync (empty base), files that exist on both sides with different content become conflicts rather than being overwritten.
+
+## Commit messages
+
+Both devices write the same brief format:
+
+```
+phone: 1 added, 2 modified
+
+A Daily/2026-10-10.md
+M Projects/syncthing.md
+M Inbox.md
+```
+
+The subject names the device. The body lists up to 10 files, relative to the vault. The commit author is the GitHub account that pushed: your git identity on the PC, the token owner on the phone.
 
 ## What is not synced
 
-Both sides honour the vault's `.gitignore` (created by `sync.ps1 -Init`). By default it excludes:
+`obsidian-notes/.gitignore` applies to both devices. By default it excludes:
 
 - `.obsidian/workspace.json`, `.obsidian/workspace-mobile.json`: UI layout that changes constantly and differs per device
 - `.obsidian/cache`, `.trash/`, OS junk files
 
-The rest of `.obsidian/` (settings, plugins, themes) *is* synced. Add lines to `.gitignore` to keep per-device settings separate. The phone supports the usual `*`, `**`, `?`, trailing `/` and leading `/` patterns, but not `!` negation.
+The rest of `.obsidian/` (settings, plugins, themes) *is* synced. The phone supports `*`, `**`, `?`, trailing `/` and leading `/` patterns, but not `!` negation.
 
-## Resource usage
+## Resource use
 
 | | Idle | During a sync |
 | --- | --- | --- |
-| Laptop script | ~0% CPU (event-driven + 5 s wake-up), ~90 MB RAM (Windows PowerShell host), below-normal priority | `git` for a second or two |
+| PC background sync | ~0% CPU (event-driven + 5 s wake-up), ~90 MB RAM (Windows PowerShell host), below-normal priority | `git` for a second or two |
+| Windows app window | Only while open; refreshes small status files every 5 s | – |
 | Android app | **Nothing resident.** WorkManager starts a short-lived background isolate after edits and every 15 min, only with a network connection | Edit check: stat walk, no network. Poll: 1 API call when nothing changed |
 
 ## Limits
 
-- Files over 95 MB are skipped by the phone (GitHub's API limit is 100 MB). Keep large attachments out of the vault or in `.gitignore`.
-- The GitHub API returns at most 100k entries for a recursive tree, which is far beyond a normal vault.
-- The phone's first sync downloads each file with one API call (5,000 calls/hour limit). For a very large vault, let the first sync run a couple of times.
+- Files over 95 MB are skipped by the phone (GitHub's API limit is 100 MB).
+- The GitHub API returns at most 100k entries for a recursive tree.
+- The phone's first sync downloads each file with one API call (5,000 calls/hour), so seed big vaults from the PC.

@@ -1,14 +1,22 @@
 package dev.pmaha.syncthing
 
+import android.app.job.JobScheduler
+import android.content.ComponentName
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.time.LocalDate
 
 class MainActivity : FlutterActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    override fun onResume() {
+        super.onResume()
         LauncherIcon.schedule(this)
     }
 
@@ -22,14 +30,53 @@ class MainActivity : FlutterActivity() {
                             mapOf("id" to it.id, "greeting" to it.greeting, "emoji" to it.emoji)
                         },
                     )
-                    "getMode" -> result.success(LauncherIcon.mode(this))
-                    "setMode" -> {
-                        LauncherIcon.setMode(this, call.arguments as String)
-                        result.success(null)
-                    }
+                    // Play Services' scanner brings its own camera UI, so the app needs no camera permission.
+                    "scanQr" -> GmsBarcodeScanning.getClient(
+                        this,
+                        GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build(),
+                    ).startScan()
+                        .addOnSuccessListener { result.success(it.rawValue) }
+                        .addOnCanceledListener { result.success(null) }
+                        .addOnFailureListener { result.error("scan", it.message, null) }
+                    "openAutoStart" -> result.success(openAutoStart())
+                    // WorkManager's own database still lists work an OEM battery manager deleted,
+                    // so ask the system scheduler what is really pending.
+                    "pendingJobs" -> result.success(getSystemService(JobScheduler::class.java).allPendingJobs.size)
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * Phone makers' battery managers (Infinix XOS "Hiber", MIUI, ColorOS...) delete an app's
+     * scheduled jobs when it is swiped from Recents unless it is allowed to auto-start.
+     * Opens that screen if this phone has one, else the app's info page. Returns true for the former.
+     */
+    private fun openAutoStart(): Boolean {
+        val candidates = listOf(
+            ComponentName("com.transsion.phonemaster", "com.cyin.himgr.autostart.AutoStartActivity"),
+            ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+            ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+            ComponentName("com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity"),
+            ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
+            ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+        )
+        for (c in candidates) {
+            val intent = Intent().setComponent(c).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (intent.resolveActivity(packageManager) != null) {
+                try {
+                    startActivity(intent)
+                    return true
+                } catch (e: Exception) {
+                    continue
+                }
+            }
+        }
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        return false
     }
 
     // Swapping the alias while the app is on screen can make some launchers close it,

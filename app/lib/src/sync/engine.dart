@@ -75,26 +75,57 @@ class SyncSummary {
   }
 }
 
+/// One repo folder (by path prefix) mirrored to one local directory.
+class SyncRoot {
+  SyncRoot(this.prefix, this.dir, {IgnoreRules? ignore}) : ignore = ignore ?? IgnoreRules(const []);
+
+  final String prefix;
+  final Directory dir;
+  final IgnoreRules ignore;
+
+  bool owns(String path) => path.startsWith(prefix);
+  bool ignores(String path) => ignore.ignores(path.substring(prefix.length));
+}
+
 class SyncEngine {
   SyncEngine({
-    required this.vault,
+    required this.roots,
     required this.remote,
     required this.state,
     required this.deviceName,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
-  final Directory vault;
+  /// The usual layout: the vault under [notesPrefix], honouring its .gitignore.
+  static Future<List<SyncRoot>> standardRoots(Directory vault, Directory config) async {
+    final gitignore = File('${vault.path}/.gitignore');
+    final rules = IgnoreRules.fromGitignore(
+        await gitignore.exists() ? await gitignore.readAsString() : null);
+    return [SyncRoot(notesPrefix, vault, ignore: rules), SyncRoot(configPrefix, config)];
+  }
+
+  final List<SyncRoot> roots;
   final RemoteRepo remote;
   final SyncState state;
   final String deviceName;
   final DateTime Function() _now;
 
-  /// Local-only check (no network): has anything in the vault changed since the last sync?
+  SyncRoot? _rootOf(String path) {
+    for (final r in roots) {
+      if (r.owns(path)) return r;
+    }
+    return null;
+  }
+
+  bool _tracked(String path) {
+    final r = _rootOf(path);
+    return r != null && !r.ignores(path);
+  }
+
+  /// Local-only check (no network): has anything changed since the last sync?
   Future<bool> hasLocalChanges() async {
     if (state.commit == null) return true;
-    final ignore = IgnoreRules.fromGitignore(await _readText('.gitignore'));
-    final local = await _scan(ignore, SyncSummary());
+    final local = await _scan(SyncSummary());
     if (local.length != state.base.length) return true;
     return local.entries.any((e) => state.base[e.key] != e.value);
   }
@@ -109,12 +140,11 @@ class SyncEngine {
 
   /// Returns false when the push lost a race with another device.
   Future<bool> _pass(SyncSummary summary) async {
-    final ignore = IgnoreRules.fromGitignore(await _readText('.gitignore'));
     final head = await remote.head();
     final remoteFiles = head.commit == state.commit
         ? Map.of(state.base)
-        : ((await remote.tree(head.tree))..removeWhere((p, _) => ignore.ignores(p)));
-    final local = await _scan(ignore, summary);
+        : ((await remote.tree(head.tree))..removeWhere((p, _) => !_tracked(p)));
+    final local = await _scan(summary);
     final base = state.commit == null ? <String, String>{} : state.base;
 
     final actions = planSync(base: base, local: local, remote: remoteFiles);
@@ -167,56 +197,58 @@ class SyncEngine {
     return true;
   }
 
-  File _file(String rel) => File('${vault.path}/$rel');
-
-  Future<String?> _readText(String rel) async {
-    final f = _file(rel);
-    return await f.exists() ? f.readAsString() : null;
+  File _file(String path) {
+    final r = _rootOf(path)!;
+    return File('${r.dir.path}/${path.substring(r.prefix.length)}');
   }
 
-  Future<Map<String, String>> _scan(IgnoreRules ignore, SyncSummary summary) async {
+  Future<Map<String, String>> _scan(SyncSummary summary) async {
     final result = <String, String>{};
     final seen = <String>{};
-    final root = vault.path.length + 1;
-    await for (final e in vault.list(recursive: true, followLinks: false)) {
-      if (e is! File) continue;
-      final rel = e.path.substring(root).replaceAll('\\', '/');
-      if (ignore.ignores(rel)) continue;
-      final stat = await e.stat();
-      if (stat.size > maxFileBytes) {
-        summary.skipped.add(rel);
-        continue;
+    for (final root in roots) {
+      if (!await root.dir.exists()) continue;
+      final cut = root.dir.path.length + 1;
+      await for (final e in root.dir.list(recursive: true, followLinks: false)) {
+        if (e is! File) continue;
+        final path = root.prefix + e.path.substring(cut).replaceAll('\\', '/');
+        if (root.ignores(path)) continue;
+        final stat = await e.stat();
+        if (stat.size > maxFileBytes) {
+          summary.skipped.add(path);
+          continue;
+        }
+        seen.add(path);
+        final mtime = stat.modified.millisecondsSinceEpoch;
+        final cached = state.hashCache[path];
+        if (cached != null && cached[0] == stat.size && cached[1] == mtime) {
+          result[path] = cached[2] as String;
+          continue;
+        }
+        final sha = gitBlobSha(await e.readAsBytes());
+        state.hashCache[path] = [stat.size, mtime, sha];
+        result[path] = sha;
       }
-      seen.add(rel);
-      final mtime = stat.modified.millisecondsSinceEpoch;
-      final cached = state.hashCache[rel];
-      if (cached != null && cached[0] == stat.size && cached[1] == mtime) {
-        result[rel] = cached[2] as String;
-        continue;
-      }
-      final sha = gitBlobSha(await e.readAsBytes());
-      state.hashCache[rel] = [stat.size, mtime, sha];
-      result[rel] = sha;
     }
     state.hashCache.removeWhere((p, _) => !seen.contains(p));
     return result;
   }
 
-  Future<void> _download(String rel, String sha) async {
-    final f = _file(rel);
+  Future<void> _download(String path, String sha) async {
+    final f = _file(path);
     await f.parent.create(recursive: true);
     await f.writeAsBytes(await remote.blob(sha), flush: true);
     final stat = await f.stat();
-    state.hashCache[rel] = [stat.size, stat.modified.millisecondsSinceEpoch, sha];
+    state.hashCache[path] = [stat.size, stat.modified.millisecondsSinceEpoch, sha];
   }
 
-  Future<void> _deleteLocal(String rel) async {
-    final f = _file(rel);
+  Future<void> _deleteLocal(String path) async {
+    final f = _file(path);
     if (await f.exists()) await f.delete();
-    state.hashCache.remove(rel);
+    state.hashCache.remove(path);
     // Obsidian shows empty folders, so prune the ones a remote delete left behind.
+    final top = _rootOf(path)!.dir.path.length;
     var dir = f.parent;
-    while (dir.path.length > vault.path.length && await dir.list().isEmpty) {
+    while (dir.path.length > top && await dir.list().isEmpty) {
       await dir.delete();
       dir = dir.parent;
     }

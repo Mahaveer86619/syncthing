@@ -1,6 +1,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'sync/plan.dart';
+
 class SyncConfig {
   SyncConfig({
     this.repo = '',
@@ -36,7 +38,7 @@ class SyncConfig {
   }
 
   /// Identifies the vault/remote pair so changing either starts from a clean sync state.
-  String get stateKey => '$repo@$branch|$vaultPath';
+  String get stateKey => '$repo@$branch|$vaultPath|$notesPrefix';
 
   static Future<SyncConfig> load() async {
     final p = await SharedPreferences.getInstance();
