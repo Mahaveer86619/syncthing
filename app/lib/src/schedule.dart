@@ -1,5 +1,7 @@
 import 'package:workmanager/workmanager.dart';
 
+import 'runner.dart';
+
 /// Pulls remote changes and is the guaranteed floor; Android won't run periodic work more often.
 const pollTask = 'vault-poll';
 
@@ -18,10 +20,11 @@ Future<void> applySchedule(bool autoSync) async {
   await Workmanager().registerPeriodicTask(
     pollTask,
     pollTask,
-    frequency: const Duration(minutes: 15),
+    frequency: pollInterval,
     constraints: Constraints(networkType: NetworkType.connected),
     existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
   );
+  await markPollScheduled();
   await armWatch();
 }
 

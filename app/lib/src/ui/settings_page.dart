@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../config.dart';
+import '../festival.dart';
 import '../schedule.dart';
+import '../vaults.dart';
+import 'widgets.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -22,7 +25,10 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _autoSync = true;
   bool _storageGranted = false;
   bool _batteryUnrestricted = false;
+  bool _showToken = false;
   bool _loaded = false;
+  List<String> _vaults = [];
+  String _iconMode = 'auto';
 
   @override
   void initState() {
@@ -40,7 +46,20 @@ class _SettingsPageState extends State<SettingsPage> {
     _autoSync = c.autoSync;
     _storageGranted = await _hasStorageAccess();
     _batteryUnrestricted = await Permission.ignoreBatteryOptimizations.isGranted;
+    _iconMode = await Festival.iconMode();
     if (mounted) setState(() => _loaded = true);
+    // Walking shared storage can take seconds; the form is usable meanwhile.
+    if (_storageGranted) await _detectVaults();
+  }
+
+  Future<void> _detectVaults() async {
+    final vaults = await findVaults();
+    final current = _vault.text.trim();
+    if (current.isNotEmpty && !isVault(current)) {
+      _vault.text = await resolveVault(current);
+    }
+    if (_vault.text.trim().isEmpty && vaults.isNotEmpty) _vault.text = vaults.first;
+    if (mounted) setState(() => _vaults = vaults);
   }
 
   // Obsidian vaults live in shared storage, which plain file IO can only reach with "All files access".
@@ -53,6 +72,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     final granted = await _hasStorageAccess();
     if (mounted) setState(() => _storageGranted = granted);
+    if (granted) await _detectVaults();
   }
 
   // Without this, Doze and vendor battery savers can delay background syncs by hours.
@@ -63,7 +83,18 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _pickVault() async {
     final path = await FilePicker.getDirectoryPath(dialogTitle: 'Obsidian vault folder');
-    if (path != null) _vault.text = path;
+    if (path == null) return;
+    final resolved = await resolveVault(path);
+    setState(() => _vault.text = resolved);
+  }
+
+  Future<void> _setIconMode(String mode) async {
+    setState(() => _iconMode = mode);
+    await Festival.setIconMode(mode);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('The home-screen icon updates when you leave the app')),
+    );
   }
 
   Future<void> _save() async {
@@ -77,94 +108,211 @@ class _SettingsPageState extends State<SettingsPage> {
       autoSync: _autoSync,
     ).save();
     await applySchedule(_autoSync);
-    if (mounted) Navigator.of(context).pop();
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   String? _required(String? v) => (v == null || v.trim().isEmpty) ? 'Required' : null;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
           : Form(
               key: _form,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  TextFormField(
-                    controller: _repo,
-                    decoration: const InputDecoration(
-                      labelText: 'Notes repo',
-                      hintText: 'owner/repo or GitHub URL',
+              child: CustomScrollView(
+                slivers: [
+                  const SliverAppBar.large(title: Text('Settings')),
+                  SliverList.list(children: [
+                    Section(
+                      title: 'GITHUB',
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        TextFormField(
+                          controller: _repo,
+                          decoration: const InputDecoration(
+                            labelText: 'Notes repo',
+                            hintText: 'owner/repo',
+                            prefixIcon: Icon(Icons.inventory_2_outlined),
+                          ),
+                          validator: (v) =>
+                              SyncConfig.normaliseRepo(v ?? '').split('/').length == 2
+                                  ? null
+                                  : 'Use owner/repo',
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _branch,
+                          decoration: const InputDecoration(
+                            labelText: 'Branch',
+                            prefixIcon: Icon(Icons.alt_route_rounded),
+                          ),
+                          validator: _required,
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _token,
+                          obscureText: !_showToken,
+                          decoration: InputDecoration(
+                            labelText: 'Access token',
+                            helperText: 'Fine-grained token · Contents: read & write on this repo',
+                            prefixIcon: const Icon(Icons.key_rounded),
+                            suffixIcon: IconButton(
+                              icon: Icon(_showToken
+                                  ? Icons.visibility_off_rounded
+                                  : Icons.visibility_rounded),
+                              onPressed: () => setState(() => _showToken = !_showToken),
+                            ),
+                          ),
+                          validator: _required,
+                        ),
+                      ],
                     ),
-                    validator: (v) => SyncConfig.normaliseRepo(v ?? '').split('/').length == 2
-                        ? null
-                        : 'Use owner/repo',
-                  ),
-                  TextFormField(
-                    controller: _branch,
-                    decoration: const InputDecoration(labelText: 'Branch'),
-                    validator: _required,
-                  ),
-                  TextFormField(
-                    controller: _token,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'GitHub token',
-                      helperText: 'Fine-grained token: Contents read/write on this repo only',
+                    Section(
+                      title: 'VAULT',
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        if (_vaults.isNotEmpty) ...[
+                          Text('Found on this phone',
+                              style: Theme.of(context).textTheme.labelLarge),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final v in _vaults)
+                                ChoiceChip(
+                                  avatar: const Icon(Icons.auto_stories_outlined, size: 18),
+                                  label: Text(v.split('/').last),
+                                  selected: _vault.text.trim() == v,
+                                  onSelected: (_) => setState(() => _vault.text = v),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                        TextFormField(
+                          controller: _vault,
+                          decoration: InputDecoration(
+                            labelText: 'Vault folder',
+                            prefixIcon: const Icon(Icons.folder_rounded),
+                            suffixIcon: IconButton(
+                              tooltip: 'Browse',
+                              icon: const Icon(Icons.folder_open_rounded),
+                              onPressed: _pickVault,
+                            ),
+                          ),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'Required';
+                            if (_storageGranted && !isVault(v.trim())) {
+                              return 'Not an Obsidian vault (no .obsidian folder inside)';
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
                     ),
-                    validator: _required,
-                  ),
-                  TextFormField(
-                    controller: _vault,
-                    decoration: InputDecoration(
-                      labelText: 'Vault folder',
-                      hintText: '/storage/emulated/0/Documents/MyVault',
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.folder_open),
-                        onPressed: _pickVault,
-                      ),
+                    Section(
+                      title: 'THIS PHONE',
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        TextFormField(
+                          controller: _device,
+                          decoration: const InputDecoration(
+                            labelText: 'Device name',
+                            helperText: 'Starts every commit from this phone, e.g. "phone: 2 added"',
+                            prefixIcon: Icon(Icons.smartphone_rounded),
+                          ),
+                          validator: _required,
+                        ),
+                      ],
                     ),
-                    validator: _required,
-                  ),
-                  TextFormField(
-                    controller: _device,
-                    decoration: const InputDecoration(
-                      labelText: 'Device name',
-                      helperText: 'Shown in commit messages',
+                    Section(
+                      title: 'KEEP SYNCING RELIABLY',
+                      children: [
+                        _PermissionTile(
+                          icon: Icons.folder_special_rounded,
+                          title: 'Storage access',
+                          granted: _storageGranted,
+                          grantedText: 'Can read and write your vault',
+                          neededText: 'Needed to read and write your vault',
+                          onGrant: _requestStorage,
+                        ),
+                        _PermissionTile(
+                          icon: Icons.battery_charging_full_rounded,
+                          title: 'Unrestricted battery',
+                          granted: _batteryUnrestricted,
+                          grantedText: 'Background syncs run on time',
+                          neededText: "So Android doesn't postpone auto sync",
+                          onGrant: _requestBattery,
+                        ),
+                      ],
                     ),
-                    validator: _required,
-                  ),
-                  const SizedBox(height: 16),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(_storageGranted ? Icons.check_circle : Icons.warning_amber),
-                    title: const Text('Storage access'),
-                    subtitle: Text(_storageGranted
-                        ? 'Granted'
-                        : 'Needed to read and write the vault folder'),
-                    trailing: _storageGranted
-                        ? null
-                        : TextButton(onPressed: _requestStorage, child: const Text('Grant')),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(_batteryUnrestricted ? Icons.check_circle : Icons.battery_alert),
-                    title: const Text('Battery: unrestricted'),
-                    subtitle: Text(_batteryUnrestricted
-                        ? 'Background syncs run on time'
-                        : "Recommended so Android doesn't postpone auto sync"),
-                    trailing: _batteryUnrestricted
-                        ? null
-                        : TextButton(onPressed: _requestBattery, child: const Text('Allow')),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(onPressed: _save, child: const Text('Save')),
+                    Section(
+                      title: 'APP ICON',
+                      children: [
+                        for (final m in Festival.iconModes.entries)
+                          RadioListTile<String>(
+                            value: m.key,
+                            // ignore: deprecated_member_use
+                            groupValue: _iconMode == 'mono' ? 'mono' : 'auto',
+                            // ignore: deprecated_member_use
+                            onChanged: (v) => _setIconMode(v!),
+                            title: Text(m.value.$1),
+                            subtitle: Text(m.value.$2),
+                          ),
+                      ],
+                    ),
+                  ]),
                 ],
               ),
             ),
+      bottomNavigationBar: !_loaded
+          ? null
+          : SafeArea(
+              child: Container(
+                color: scheme.surface,
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.check_rounded),
+                  label: const Text('Save'),
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+class _PermissionTile extends StatelessWidget {
+  const _PermissionTile({
+    required this.icon,
+    required this.title,
+    required this.granted,
+    required this.grantedText,
+    required this.neededText,
+    required this.onGrant,
+  });
+
+  final IconData icon;
+  final String title, grantedText, neededText;
+  final bool granted;
+  final VoidCallback onGrant;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: TonalIcon(
+        granted ? Icons.check_rounded : icon,
+        color: granted ? scheme.primaryContainer : scheme.errorContainer,
+        onColor: granted ? scheme.onPrimaryContainer : scheme.onErrorContainer,
+      ),
+      title: Text(title, style: Theme.of(context).textTheme.titleMedium),
+      subtitle: Text(granted ? grantedText : neededText),
+      trailing: granted ? null : FilledButton.tonal(onPressed: onGrant, child: const Text('Allow')),
     );
   }
 }

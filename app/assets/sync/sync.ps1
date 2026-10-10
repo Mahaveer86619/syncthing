@@ -36,6 +36,12 @@ function Write-Log([string]$Message) {
     Write-Host $line
 }
 
+# Read by the Windows app: the outcome of the latest sync attempt.
+function Set-Status([string]$State, [string]$Message = '') {
+    $json = @{ state = $State; message = $Message; time = (Get-Date).ToString('o') } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText((Join-Path $LogDir 'status.json'), $json, (New-Object Text.UTF8Encoding($false)))
+}
+
 function Read-Config {
     if (-not (Test-Path $ConfigPath)) { throw "Config not found: $ConfigPath (copy config.example.json to config.json)" }
     $c = Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -76,19 +82,28 @@ function Get-ConflictPath([string]$RelPath) {
 
 # Same format as the phone: "<device>: 2 added, 1 modified" and a short file list.
 # Who pushed is the commit author (your git identity).
-function New-CommitMessage([string[]]$Porcelain) {
+function New-CommitMessage {
     $kinds = [ordered]@{ A = 'added'; M = 'modified'; R = 'renamed'; D = 'deleted' }
     $counts = @{}
-    $files = foreach ($line in $Porcelain) {
-        $code = $line.Substring(0, 1)
+    # name-status is tab-separated and, with core.quotepath=false, leaves spaces unquoted.
+    $files = foreach ($line in Invoke-Git @('diff', '--cached', '--name-status', '-M')) {
+        $fields = $line -split "`t"
+        $code = $fields[0].Substring(0, 1)
         if (-not $kinds.Contains($code)) { $code = 'M' }
         $counts[$code] = 1 + [int]$counts[$code]
-        '{0} {1}' -f $code, $line.Substring(3).Trim('"')
+        '{0} {1}' -f $code, $fields[-1]
     }
     $summary = ($kinds.Keys | Where-Object { $counts[$_] } | ForEach-Object { "$($counts[$_]) $($kinds[$_])" }) -join ', '
     $body = @($files | Sort-Object { $_.Substring(2) } | Select-Object -First 10)
     if ($files.Count -gt 10) { $body += "... and $($files.Count - 10) more" }
     "$($Config.deviceName): $summary`n`n$($body -join "`n")"
+}
+
+# The message goes through a file: Windows PowerShell 5.1 mangles quotes inside native arguments.
+function Save-Commit([string]$Message) {
+    $msgFile = Join-Path $env:TEMP 'syncthing-commit-msg.txt'
+    [IO.File]::WriteAllText($msgFile, $Message, (New-Object Text.UTF8Encoding($false)))
+    Invoke-Git @('commit', '-q', '-F', $msgFile) | Out-Null
 }
 
 function Initialize-Vault {
@@ -152,7 +167,7 @@ function Merge-Remote {
     }
     Invoke-Git @('add', '-A') | Out-Null
     $n = $conflicts.Count
-    Invoke-Git @('commit', '-q', '-m', "$($Config.deviceName): merge, $(if ($n -eq 1) { '1 conflict kept as a copy' } else { "$n conflicts kept as copies" })") | Out-Null
+    Save-Commit "$($Config.deviceName): merge, $(if ($n -eq 1) { '1 conflict kept as a copy' } else { "$n conflicts kept as copies" })"
     Write-Log "merged remote changes; kept both versions of $($conflicts.Count) conflicting file(s)"
 }
 
@@ -160,7 +175,7 @@ function Sync-Vault([switch]$LocalOnly) {
     Invoke-Git @('add', '-A') | Out-Null
     $changes = @(Invoke-Git @('status', '--porcelain'))
     if ($changes.Count -gt 0) {
-        Invoke-Git @('commit', '-q', '-m', (New-CommitMessage $changes)) | Out-Null
+        Save-Commit (New-CommitMessage)
         Write-Log "committed $($changes.Count) local change(s)"
     }
     if (-not (Test-GitRef 'HEAD')) { return }
@@ -172,20 +187,25 @@ function Sync-Vault([switch]$LocalOnly) {
 
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         Invoke-Git @('fetch', '-q', 'origin') -AllowFail | Out-Null
-        if ($script:LastGitExit -ne 0) { Write-Log 'fetch failed (offline?); will retry later'; return }
+        if ($script:LastGitExit -ne 0) {
+            Write-Log 'fetch failed (offline?); will retry later'
+            Set-Status 'offline' 'Could not reach GitHub'
+            return
+        }
 
         if (-not (Test-GitRef "refs/remotes/origin/$Branch")) {
             Invoke-Git @('push', '-q', '-u', 'origin', "HEAD:$Branch") | Out-Null
             Write-Log "pushed initial branch $Branch"
+            Set-Status 'ok'
             return
         }
         $behind = [int](Invoke-Git @('rev-list', '--count', "HEAD..origin/$Branch"))
         if ($behind -gt 0) { Merge-Remote }
 
         $ahead = [int](Invoke-Git @('rev-list', '--count', "origin/$Branch..HEAD"))
-        if ($ahead -eq 0) { return }
+        if ($ahead -eq 0) { Set-Status 'ok'; return }
         Invoke-Git @('push', '-q', 'origin', "HEAD:$Branch") -AllowFail | Out-Null
-        if ($script:LastGitExit -eq 0) { Write-Log "pushed $ahead commit(s)"; return }
+        if ($script:LastGitExit -eq 0) { Write-Log "pushed $ahead commit(s)"; Set-Status 'ok'; return }
         Write-Log "push rejected (attempt $attempt); refetching"
     }
 }
@@ -209,11 +229,18 @@ $env:GIT_TERMINAL_PROMPT = '0'
 
 if ($Init) { Initialize-Vault; exit 0 }
 if (-not (Test-Path (Join-Path $Vault '.git'))) { throw "$Vault is not set up yet; run: .\sync.ps1 -Init" }
-if ($Once) { Sync-Vault; exit 0 }
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory $LogDir | Out-Null }
+if ($Once) {
+    try { Sync-Vault } catch { Write-Log "ERROR: $_"; Set-Status 'error' "$_"; exit 1 }
+    exit 0
+}
 
 $mutex = New-Object System.Threading.Mutex($false, 'Local\syncthing-laptop-sync')
 if (-not $mutex.WaitOne(0)) { Write-Log 'another instance is already running; exiting'; exit 0 }
 (Get-Process -Id $PID).PriorityClass = 'BelowNormal'
+Set-Content -Path (Join-Path $LogDir 'daemon.pid') -Value $PID -Encoding ASCII
+# The Windows app drops this file to ask for an immediate full sync.
+$syncNowFile = Join-Path $PSScriptRoot 'sync-now'
 
 $watcher = New-Object System.IO.FileSystemWatcher $Vault
 $watcher.IncludeSubdirectories = $true
@@ -233,14 +260,21 @@ while ($true) {
     if (Test-VaultEvents) { $dirty = $true; $lastEvent = Get-Date }
     $now = Get-Date
     try {
-        if ($dirty -and ($now - $lastEvent).TotalSeconds -ge $Config.debounceSeconds) {
+        if (Test-Path $syncNowFile) {
+            Remove-Item $syncNowFile -Force
+            $nextPoll = $now.AddSeconds($Config.pollSeconds)
+            Set-Content -Path (Join-Path $LogDir 'last_poll') -Value $now.ToString('o') -Encoding ASCII
+            Sync-Vault
+        } elseif ($dirty -and ($now - $lastEvent).TotalSeconds -ge $Config.debounceSeconds) {
             $dirty = $false
             Sync-Vault -LocalOnly
         } elseif ($now -ge $nextPoll) {
             $nextPoll = $now.AddSeconds($Config.pollSeconds)
+            Set-Content -Path (Join-Path $LogDir 'last_poll') -Value $now.ToString('o') -Encoding ASCII
             Sync-Vault
         }
     } catch {
         Write-Log "ERROR: $_"
+        Set-Status 'error' "$_"
     }
 }

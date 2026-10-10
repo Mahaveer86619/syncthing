@@ -29,6 +29,10 @@ syncthing/
 | Android SDK | command-line tools zip → `sdkmanager --licenses`, `sdkmanager platform-tools` | `%LOCALAPPDATA%\Android\Sdk` (`ANDROID_HOME`) |
 | JDK for Gradle | Android Studio's bundled JBR | `flutter config --jdk-dir "C:\Program Files\Android\Android Studio\jbr"` |
 
+The project pins **AGP 9.4.1**, **Gradle 9.6.0** and **`compileSdk = 37`**. `permission_handler_android` compiles against API 37, and the Flutter template's AGP 9.1 can't resolve the SDK's `android-37.0` platform. If Gradle doesn't fetch the NDK itself, install it with `sdkmanager --package_file=<file>` containing `ndk;<version>` (the `.bat` wrapper splits arguments on `;`).
+
+When editing `*.gradle.kts` from Windows PowerShell 5.1, don't use `Set-Content -Encoding UTF8`. It adds a BOM that breaks the Kotlin script's `plugins {}` block.
+
 Gradle downloads the SDK platform, build-tools and NDK it needs on the first build. If your global `JAVA_HOME` is a very new JDK, keep the `--jdk-dir` setting, since Gradle often lags behind the newest Java.
 
 Check everything with `flutter doctor`.

@@ -150,7 +150,7 @@ void main() {
     remote.put('n.md', 'laptop');
     await write('n.md', 'phone');
 
-    expect((await sync()).conflicts, 1);
+    expect((await sync()).conflicts.length, 1);
     const copy = 'n (conflict 2026-01-02 030405).md';
     expect(await f('n.md').readAsString(), 'phone');
     expect(await f(copy).readAsString(), 'laptop');

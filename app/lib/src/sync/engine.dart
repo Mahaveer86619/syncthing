@@ -50,10 +50,17 @@ class SyncState {
 }
 
 class SyncSummary {
-  int downloaded = 0, uploaded = 0, deletedLocal = 0, deletedRemote = 0, conflicts = 0;
+  final received = <String>{}, sent = <String>{}, removedHere = <String>{}, removedThere = <String>{};
+  final conflicts = <String>{};
   final List<String> skipped = [];
 
-  bool get isEmpty => downloaded + uploaded + deletedLocal + deletedRemote + conflicts == 0;
+  int get downloaded => received.length;
+  int get uploaded => sent.length;
+  int get deletedLocal => removedHere.length;
+  int get deletedRemote => removedThere.length;
+
+  bool get isEmpty =>
+      received.isEmpty && sent.isEmpty && removedHere.isEmpty && removedThere.isEmpty && conflicts.isEmpty;
 
   @override
   String toString() {
@@ -62,7 +69,7 @@ class SyncSummary {
       if (downloaded > 0) '$downloaded down',
       if (uploaded > 0) '$uploaded up',
       if (deletedLocal + deletedRemote > 0) '${deletedLocal + deletedRemote} deleted',
-      if (conflicts > 0) '$conflicts conflict(s) kept as copies',
+      if (conflicts.isNotEmpty) '${conflicts.length} conflict(s) kept as copies',
     ];
     return parts.join(', ');
   }
@@ -118,18 +125,18 @@ class SyncEngine {
       switch (a.kind) {
         case ActionKind.download:
           await _download(a.path, remoteFiles[a.path]!);
-          summary.downloaded++;
+          summary.received.add(a.path);
         case ActionKind.deleteLocal:
           await _deleteLocal(a.path);
-          summary.deletedLocal++;
+          summary.removedHere.add(a.path);
         case ActionKind.upload:
           changes[a.path] = await remote.createBlob(await _file(a.path).readAsBytes());
           remoteFiles.containsKey(a.path) ? message.modified(a.path) : message.added(a.path);
-          summary.uploaded++;
+          summary.sent.add(a.path);
         case ActionKind.deleteRemote:
           changes[a.path] = null;
           message.deleted(a.path);
-          summary.deletedRemote++;
+          summary.removedThere.add(a.path);
         case ActionKind.conflict:
           // Local version stays in place; the remote one is kept beside it under a new name.
           final copy = conflictPath(a.path, _now());
@@ -137,7 +144,7 @@ class SyncEngine {
           changes[copy] = remoteFiles[a.path];
           changes[a.path] = await remote.createBlob(await _file(a.path).readAsBytes());
           message.conflict(a.path);
-          summary.conflicts++;
+          summary.conflicts.add(a.path);
       }
     });
 

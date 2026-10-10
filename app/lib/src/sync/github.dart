@@ -56,10 +56,10 @@ class GitHubRepo implements RemoteRepo {
   final http.Client _client;
   final Map<String, String> _headers;
 
-  Uri _uri(String path) => Uri.https('api.github.com', '/repos/$owner/$repo$path');
-
-  Future<http.Response> _send(String method, String path, [Object? body]) async {
-    final req = http.Request(method, _uri(path))..headers.addAll(_headers);
+  Future<http.Response> _send(String method, String path,
+      [Object? body, Map<String, String>? query]) async {
+    final uri = Uri.https('api.github.com', '/repos/$owner/$repo$path', query);
+    final req = http.Request(method, uri)..headers.addAll(_headers);
     if (body != null) {
       req.headers['Content-Type'] = 'application/json';
       req.body = jsonEncode(body);
@@ -97,7 +97,7 @@ class GitHubRepo implements RemoteRepo {
 
   @override
   Future<Map<String, String>> tree(String treeSha) async {
-    final res = _json(await _send('GET', '/git/trees/$treeSha?recursive=1'), 'Tree');
+    final res = _json(await _send('GET', '/git/trees/$treeSha', null, {'recursive': '1'}), 'Tree');
     if (res['truncated'] == true) {
       throw SyncException('Repository tree too large for the GitHub API');
     }
