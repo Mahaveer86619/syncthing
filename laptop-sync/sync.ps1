@@ -16,12 +16,14 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'config.json'),
+    [string]$ConfigPath,
     [switch]$Init,
     [switch]$Once
 )
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty inside param() defaults.
+if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot 'config.json' }
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $LogDir = Join-Path $PSScriptRoot 'logs'
 $LogFile = Join-Path $LogDir 'sync.log'
@@ -72,6 +74,23 @@ function Get-ConflictPath([string]$RelPath) {
     if ($dir) { Join-Path $dir $file } else { $file }
 }
 
+# Same format as the phone: "<device>: 2 added, 1 modified" and a short file list.
+# Who pushed is the commit author (your git identity).
+function New-CommitMessage([string[]]$Porcelain) {
+    $kinds = [ordered]@{ A = 'added'; M = 'modified'; R = 'renamed'; D = 'deleted' }
+    $counts = @{}
+    $files = foreach ($line in $Porcelain) {
+        $code = $line.Substring(0, 1)
+        if (-not $kinds.Contains($code)) { $code = 'M' }
+        $counts[$code] = 1 + [int]$counts[$code]
+        '{0} {1}' -f $code, $line.Substring(3).Trim('"')
+    }
+    $summary = ($kinds.Keys | Where-Object { $counts[$_] } | ForEach-Object { "$($counts[$_]) $($kinds[$_])" }) -join ', '
+    $body = @($files | Sort-Object { $_.Substring(2) } | Select-Object -First 10)
+    if ($files.Count -gt 10) { $body += "... and $($files.Count - 10) more" }
+    "$($Config.deviceName): $summary`n`n$($body -join "`n")"
+}
+
 function Initialize-Vault {
     if (-not (Test-Path $Vault)) { New-Item -ItemType Directory $Vault | Out-Null }
     if (-not (Test-Path (Join-Path $Vault '.git'))) { Invoke-Git @('init', '-q', '-b', $Branch) | Out-Null }
@@ -111,7 +130,7 @@ function Initialize-Vault {
 }
 
 function Merge-Remote {
-    Invoke-Git @('merge', '--no-edit', '-q', "origin/$Branch") -AllowFail | Out-Null
+    Invoke-Git @('merge', '-q', '-m', "$($Config.deviceName): merge", "origin/$Branch") -AllowFail | Out-Null
     if ($script:LastGitExit -eq 0) { Write-Log 'merged remote changes'; return }
 
     $conflicts = @(Invoke-Git @('diff', '--name-only', '--diff-filter=U'))
@@ -132,7 +151,8 @@ function Merge-Remote {
         }
     }
     Invoke-Git @('add', '-A') | Out-Null
-    Invoke-Git @('commit', '-q', '--no-edit') | Out-Null
+    $n = $conflicts.Count
+    Invoke-Git @('commit', '-q', '-m', "$($Config.deviceName): merge, $(if ($n -eq 1) { '1 conflict kept as a copy' } else { "$n conflicts kept as copies" })") | Out-Null
     Write-Log "merged remote changes; kept both versions of $($conflicts.Count) conflicting file(s)"
 }
 
@@ -140,7 +160,7 @@ function Sync-Vault([switch]$LocalOnly) {
     Invoke-Git @('add', '-A') | Out-Null
     $changes = @(Invoke-Git @('status', '--porcelain'))
     if ($changes.Count -gt 0) {
-        Invoke-Git @('commit', '-q', '-m', ('sync: {0} {1:yyyy-MM-dd HH:mm}' -f $Config.deviceName, (Get-Date))) | Out-Null
+        Invoke-Git @('commit', '-q', '-m', (New-CommitMessage $changes)) | Out-Null
         Write-Log "committed $($changes.Count) local change(s)"
     }
     if (-not (Test-GitRef 'HEAD')) { return }

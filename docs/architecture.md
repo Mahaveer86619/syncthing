@@ -8,7 +8,7 @@ A VM (or a peer-to-peer tool) would only add value if you needed real-time sync 
 
 What you give up:
 
-- **Latency.** Laptop → GitHub takes about 15 s after you stop typing. Phone → GitHub depends on Android scheduling (minimum 15 min in the background, instant with *Sync now*).
+- **Latency.** Laptop → GitHub takes about 15 s after you stop typing. Phone → GitHub happens shortly after Obsidian saves (edit trigger). GitHub → phone takes up to 15 min (Android's minimum periodic interval), or is instant with *Sync now*.
 - **Privacy.** Notes are stored on GitHub (private repo). Encrypting them is on the [roadmap](plan.md).
 
 ## Components
@@ -18,7 +18,7 @@ What you give up:
 | `laptop-sync/sync.ps1` | Windows laptop | `git` CLI over SSH or HTTPS (your existing git credentials) | The vault folder *is* a git clone |
 | `app/` (Flutter) | Android | GitHub REST *Git Data* API with a fine-grained token | `state.json` in app-private storage; the vault stays plain files |
 
-Both write ordinary commits to the same branch, so the repo history shows which device made each change (`sync: laptop 2026-10-10 15:30`).
+Both write ordinary commits to the same branch in one brief format: `<device>: 1 added, 2 modified`, plus a body listing up to 10 files. The commit author is the GitHub account that pushed: your git identity on the laptop, the token owner on the phone.
 
 ## Laptop flow
 
@@ -31,6 +31,16 @@ every 2 min ──▶ same, even with no local edits (pulls phone changes)
 - A local-edit sync with nothing to push makes no network call.
 - A rejected push (the phone pushed in between) is retried up to 3 times: fetch, merge, push.
 - Git does a real line-level merge, so edits to different parts of the same note combine cleanly. Only overlapping edits become conflict copies.
+
+## Phone triggers
+
+```
+Obsidian saves a file ──▶ MediaStore change ──▶ WorkManager content trigger (one-shot, re-armed each run)
+                                                 └─▶ stat-only local check ──changed?──▶ full sync
+every 15 min ──▶ WorkManager periodic job ──▶ full sync (1 API call if remote unchanged)
+```
+
+No foreground service and no resident process. See [android-app.md](android-app.md#auto-sync).
 
 ## Phone flow (sync engine)
 
@@ -67,7 +77,7 @@ The rest of `.obsidian/` (settings, plugins, themes) *is* synced. Add lines to `
 | | Idle | During a sync |
 | --- | --- | --- |
 | Laptop script | ~0% CPU (event-driven + 5 s wake-up), ~90 MB RAM (Windows PowerShell host), below-normal priority | `git` for a second or two |
-| Android app | **Nothing resident.** WorkManager starts a short-lived background isolate every ≥15 min, only on a network connection with battery not low | A few seconds; 1 API call when nothing changed |
+| Android app | **Nothing resident.** WorkManager starts a short-lived background isolate after edits and every 15 min, only with a network connection | Edit check: stat walk, no network. Poll: 1 API call when nothing changed |
 
 ## Limits
 

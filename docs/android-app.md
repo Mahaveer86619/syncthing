@@ -20,24 +20,49 @@ Open the app → **Set up notes repo**:
 | Branch | `main` |
 | GitHub token | fine-grained token, see [notes-repo-setup.md](notes-repo-setup.md#3-phone-token) |
 | Vault folder | the folder Obsidian mobile opens, e.g. `/storage/emulated/0/Documents/MyVault` (use the folder button) |
-| Device name | `phone`; shown in commit messages and conflict copies |
-| Background sync | every 15 / 30 / 60 min, or off |
+| Device name | `phone`; the prefix of every commit this phone makes |
 
-Tap **Grant** next to *Storage access*. Android opens the *All files access* screen; enable it for Syncthing. Plain file access needs this, because Obsidian keeps vaults in shared storage. The app touches only the configured folder.
+Then grant the two permissions on the same screen:
 
-Tip: to start fresh on the phone, create an empty vault in Obsidian mobile, point the app at that folder, and tap **Sync now**.
+- **Storage access → Grant.** Android opens the *All files access* screen; enable it for Syncthing. Plain file access needs this, because Obsidian keeps vaults in shared storage. The app touches only the configured folder.
+- **Battery: unrestricted → Allow.** Without it, Doze and vendor battery savers can postpone background syncs by hours.
 
-## When does it sync?
+Tip: to start fresh on the phone, create an empty vault in Obsidian mobile, point the app at that folder, and sync.
 
-- when you open the app
-- when you tap **Sync now**
-- in the background every N minutes (Android WorkManager, 15 min minimum), only on a network connection and when the battery isn't low
+## Auto sync
 
-Android can't cheaply watch another app's files, so there's no instant push from the phone. For something you just wrote, open the app and tap **Sync now**. Doze mode and some vendors' battery savers stretch background intervals. If syncs are much rarer than configured, set the app's battery usage to *Unrestricted*.
+The home screen has one main control, the **Auto sync** switch (on by default). **Sync now** next to it forces an immediate sync.
 
-## Sync log
+With auto sync on, nothing runs in the background between syncs. Android wakes the app only for these two jobs:
 
-The home screen shows the last 200 sync results (newest first), e.g. `3 down, 1 up` or `Up to date`.
+| Trigger | What runs | Cost when nothing changed |
+| --- | --- | --- |
+| **You edit a note.** Any file change in shared storage (MediaStore) fires a WorkManager content trigger within seconds of Obsidian saving. | A local-only check (file sizes and mtimes). It goes online only if the vault differs from the last sync, then pushes. | A directory stat walk, **no network** |
+| **Every 15 min** (Android's minimum for periodic work) | A full sync, which brings in the laptop's changes | **1 API call** (branch head unchanged) |
+
+Both jobs wait for a network connection. Both survive reboots, because WorkManager re-registers them. Opening the app re-registers them too, which heals schedules lost to *force stop* or an app update.
+
+The edit trigger also fires for unrelated storage changes (a new photo or download). That's why it checks locally first: those wake-ups cost a few milliseconds and no data. Downloads the app writes itself also re-fire it, and they're recognised as already synced.
+
+Expected latency: phone → GitHub within about a minute of saving. GitHub → phone within 15 min (or immediately with **Sync now**). Getting faster than 15 min would need a server to push notifications to the phone; see the [roadmap](plan.md).
+
+## Activity
+
+The home screen shows *Last checked …* and an activity list of syncs that actually moved something, e.g. `2 down, 1 up` (newest first, last 200). Idle checks only update *Last checked*, so the list doesn't fill with noise.
+
+## Commit messages
+
+Every sync that changes the repo makes one commit, for example:
+
+```
+phone: 1 added, 2 modified
+
+A Daily/2026-10-10.md
+M Projects/syncthing.md
+M Inbox.md
+```
+
+The subject says which device and what changed. The body lists up to 10 files (A = added, M = modified, D = deleted, C = conflict). GitHub records the token's account as the commit author, so *who* pushed is in the commit too. The laptop uses the same format.
 
 ## Changing settings
 

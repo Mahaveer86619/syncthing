@@ -19,8 +19,9 @@ class _SettingsPageState extends State<SettingsPage> {
   final _vault = TextEditingController();
   final _device = TextEditingController();
   final _token = TextEditingController();
-  int _interval = 15;
+  bool _autoSync = true;
   bool _storageGranted = false;
+  bool _batteryUnrestricted = false;
   bool _loaded = false;
 
   @override
@@ -36,8 +37,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _vault.text = c.vaultPath;
     _device.text = c.deviceName;
     _token.text = c.token;
-    _interval = c.intervalMinutes;
+    _autoSync = c.autoSync;
     _storageGranted = await _hasStorageAccess();
+    _batteryUnrestricted = await Permission.ignoreBatteryOptimizations.isGranted;
     if (mounted) setState(() => _loaded = true);
   }
 
@@ -53,6 +55,12 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) setState(() => _storageGranted = granted);
   }
 
+  // Without this, Doze and vendor battery savers can delay background syncs by hours.
+  Future<void> _requestBattery() async {
+    final granted = await Permission.ignoreBatteryOptimizations.request().isGranted;
+    if (mounted) setState(() => _batteryUnrestricted = granted);
+  }
+
   Future<void> _pickVault() async {
     final path = await FilePicker.getDirectoryPath(dialogTitle: 'Obsidian vault folder');
     if (path != null) _vault.text = path;
@@ -66,9 +74,9 @@ class _SettingsPageState extends State<SettingsPage> {
       vaultPath: _vault.text,
       deviceName: _device.text,
       token: _token.text,
-      intervalMinutes: _interval,
+      autoSync: _autoSync,
     ).save();
-    await applySchedule(_interval);
+    await applySchedule(_autoSync);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -130,18 +138,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     validator: _required,
                   ),
                   const SizedBox(height: 16),
-                  DropdownButtonFormField<int>(
-                    initialValue: _interval,
-                    decoration: const InputDecoration(labelText: 'Background sync'),
-                    items: const [
-                      DropdownMenuItem(value: 15, child: Text('Every 15 minutes')),
-                      DropdownMenuItem(value: 30, child: Text('Every 30 minutes')),
-                      DropdownMenuItem(value: 60, child: Text('Every hour')),
-                      DropdownMenuItem(value: 0, child: Text('Off (manual only)')),
-                    ],
-                    onChanged: (v) => setState(() => _interval = v ?? 15),
-                  ),
-                  const SizedBox(height: 16),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(_storageGranted ? Icons.check_circle : Icons.warning_amber),
@@ -152,6 +148,17 @@ class _SettingsPageState extends State<SettingsPage> {
                     trailing: _storageGranted
                         ? null
                         : TextButton(onPressed: _requestStorage, child: const Text('Grant')),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(_batteryUnrestricted ? Icons.check_circle : Icons.battery_alert),
+                    title: const Text('Battery: unrestricted'),
+                    subtitle: Text(_batteryUnrestricted
+                        ? 'Background syncs run on time'
+                        : "Recommended so Android doesn't postpone auto sync"),
+                    trailing: _batteryUnrestricted
+                        ? null
+                        : TextButton(onPressed: _requestBattery, child: const Text('Allow')),
                   ),
                   const SizedBox(height: 16),
                   FilledButton(onPressed: _save, child: const Text('Save')),

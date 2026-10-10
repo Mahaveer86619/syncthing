@@ -8,7 +8,7 @@ class SyncConfig {
     this.vaultPath = '',
     this.deviceName = 'phone',
     this.token = '',
-    this.intervalMinutes = 15,
+    this.autoSync = true,
   });
 
   /// `owner/name`; a full GitHub URL is accepted and normalised.
@@ -17,9 +17,7 @@ class SyncConfig {
   String vaultPath;
   String deviceName;
   String token;
-
-  /// 0 disables background sync. Android will not run periodic work more often than every 15 min.
-  int intervalMinutes;
+  bool autoSync;
 
   static const _secure = FlutterSecureStorage();
 
@@ -47,7 +45,7 @@ class SyncConfig {
       branch: p.getString('branch') ?? 'main',
       vaultPath: p.getString('vaultPath') ?? '',
       deviceName: p.getString('deviceName') ?? 'phone',
-      intervalMinutes: p.getInt('intervalMinutes') ?? 15,
+      autoSync: p.getBool('autoSync') ?? true,
       token: await _secure.read(key: 'token') ?? '',
     );
   }
@@ -58,7 +56,7 @@ class SyncConfig {
     await p.setString('branch', branch.trim());
     await p.setString('vaultPath', vaultPath.trim());
     await p.setString('deviceName', deviceName.trim());
-    await p.setInt('intervalMinutes', intervalMinutes);
+    await p.setBool('autoSync', autoSync);
     await _secure.write(key: 'token', value: token.trim());
   }
 }

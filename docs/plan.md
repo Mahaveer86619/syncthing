@@ -11,7 +11,8 @@ Edit Obsidian notes on a Windows laptop or an Android phone and have them appear
 | Hub | Private GitHub repo | Always on, free, versioned backup, no server to maintain. A VM isn't needed (see [architecture.md](architecture.md#why-github-as-the-hub-and-no-vm)). |
 | Laptop client | PowerShell + git CLI | Zero install on Windows, real git merges, the vault stays a normal repo (works with Obsidian Git too) |
 | Phone client | Flutter app + GitHub REST API | No git binary on Android; one API call per idle check; small APK |
-| Phone background | WorkManager periodic task | The OS-sanctioned way: survives reboots, respects Doze, nothing resident |
+| Phone background | WorkManager: MediaStore content trigger (edits) + 15-min periodic (remote) | Near-instant upload after edits and a guaranteed floor for pulls, with nothing resident. A foreground service would be faster to pull but costs RAM and a permanent notification. |
+| Commit messages | `<device>: 1 added, 2 modified` + file list; author = pushing account | Brief, and shows who pushed and from where at a glance |
 | Conflicts | Keep both (conflict copy) | Simple, transparent, never destructive |
 | Token storage | Android encrypted storage | The token never touches the vault or the repo |
 
@@ -20,14 +21,15 @@ Edit Obsidian notes on a Windows laptop or an Android phone and have them appear
 - [x] **M0: Toolchain.** Flutter stable, Android Studio, Android SDK + licenses, Gradle on a supported JDK.
 - [x] **M1: Laptop sync.** Watcher + debounce, poll, keep-both conflicts, retrying push, hidden autostart, log rotation. Tested with two vaults against a bare repo.
 - [x] **M2: Sync engine.** Three-way planner, GitHub client, hash cache, ignore rules, race retry. Unit tests with a fake remote.
-- [x] **M3: Android app.** Settings, storage permission, Sync now, log view, periodic background sync.
+- [x] **M3: Android app.** Settings, storage and battery permissions, always-on auto sync (edit trigger + 15-min poll) with a toggle and Sync now, activity view.
+- [x] **M3.1: Commit format.** Brief `<device>: counts` subject + file list on both laptop and phone.
 - [ ] **M4: Real-world trial.** Laptop + phone on the real notes repo for a week; watch the logs for conflicts, rate limits and battery.
 - [ ] **M5: Polish.** App icon, release signing, GitHub Actions to build the APK on tags.
 
 ## Roadmap ideas
 
 - Quick Settings tile / home-screen widget for one-tap sync
-- Sync when the app comes to the foreground and when charging starts
+- Faster GitHub → phone: GitHub webhook → tiny relay → FCM push to wake the app (needs a small server or serverless function)
 - First phone sync via a single zipball download instead of one call per file
 - Inline small text files in the tree request to save blob calls
 - Native (compiled Dart) laptop daemon to cut idle RAM from ~90 MB to ~15 MB, plus a Linux/macOS version

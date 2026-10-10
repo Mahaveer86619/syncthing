@@ -83,6 +83,15 @@ class SyncEngine {
   final String deviceName;
   final DateTime Function() _now;
 
+  /// Local-only check (no network): has anything in the vault changed since the last sync?
+  Future<bool> hasLocalChanges() async {
+    if (state.commit == null) return true;
+    final ignore = IgnoreRules.fromGitignore(await _readText('.gitignore'));
+    final local = await _scan(ignore, SyncSummary());
+    if (local.length != state.base.length) return true;
+    return local.entries.any((e) => state.base[e.key] != e.value);
+  }
+
   Future<SyncSummary> run() async {
     final summary = SyncSummary();
     for (var attempt = 0; attempt < 3; attempt++) {
@@ -103,6 +112,7 @@ class SyncEngine {
 
     final actions = planSync(base: base, local: local, remote: remoteFiles);
     final changes = <String, String?>{};
+    final message = CommitMessage(deviceName);
 
     await _forEachLimited(actions, (a) async {
       switch (a.kind) {
@@ -114,9 +124,11 @@ class SyncEngine {
           summary.deletedLocal++;
         case ActionKind.upload:
           changes[a.path] = await remote.createBlob(await _file(a.path).readAsBytes());
+          remoteFiles.containsKey(a.path) ? message.modified(a.path) : message.added(a.path);
           summary.uploaded++;
         case ActionKind.deleteRemote:
           changes[a.path] = null;
+          message.deleted(a.path);
           summary.deletedRemote++;
         case ActionKind.conflict:
           // Local version stays in place; the remote one is kept beside it under a new name.
@@ -124,6 +136,7 @@ class SyncEngine {
           await _download(copy, remoteFiles[a.path]!);
           changes[copy] = remoteFiles[a.path];
           changes[a.path] = await remote.createBlob(await _file(a.path).readAsBytes());
+          message.conflict(a.path);
           summary.conflicts++;
       }
     });
@@ -133,7 +146,7 @@ class SyncEngine {
       final pushed = await remote.commit(
         parent: head,
         changes: changes,
-        message: 'sync: $deviceName ${_now().toIso8601String().substring(0, 16)}',
+        message: message.toString(),
       );
       if (pushed == null) return false;
       commit = pushed;

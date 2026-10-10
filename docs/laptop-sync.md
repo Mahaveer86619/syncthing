@@ -49,6 +49,28 @@ Other modes:
 .\sync.ps1 -Once    # single sync, then exit
 ```
 
+## Commit messages
+
+```
+laptop: 1 added, 1 modified, 1 deleted
+
+M one.md
+A three.md
+D two.md
+```
+
+Merges are `laptop: merge`, or `laptop: merge, 1 conflict kept as a copy`. The author is your git identity, so the history shows who pushed and from which device. The phone uses the same format.
+
+## Several GitHub accounts on one machine
+
+If you use `includeIf "gitdir:..."` blocks to pick an SSH key and identity per folder, a vault outside those folders gets your *default* key. With a private notes repo, that shows up as `ERROR: Repository not found`. Point the vault repo at the right account explicitly:
+
+```powershell
+git -C C:\Users\you\notes config include.path C:/Users/you/.gitconfig-personal
+```
+
+This pulls in the `user.*` and `core.sshCommand` from that file. Check it with `git -C <vault> ls-remote origin`.
+
 ## Logs
 
 `laptop-sync/logs/sync.log` (rotated at 1 MB), for example:

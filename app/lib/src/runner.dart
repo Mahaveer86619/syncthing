@@ -11,7 +11,8 @@ const _maxLogLines = 200;
 
 /// Runs one sync with the saved config. Shared by the UI and the background worker,
 /// which run in separate isolates, so a lock file keeps them from overlapping.
-Future<String> runSync() async {
+/// With [ifLocalChanged], nothing is fetched unless the vault differs from the last sync.
+Future<String?> runSync({bool ifLocalChanged = false}) async {
   final dir = await getApplicationSupportDirectory();
   final lock = File('${dir.path}/sync.lock');
   try {
@@ -32,7 +33,7 @@ Future<String> runSync() async {
 
     final stateFile = File('${dir.path}/state.json');
     final state = await _loadState(stateFile, config.stateKey);
-    final summary = await SyncEngine(
+    final engine = SyncEngine(
       vault: vault,
       remote: GitHubRepo(
         owner: config.owner,
@@ -42,8 +43,15 @@ Future<String> runSync() async {
       ),
       state: state,
       deviceName: config.deviceName,
-    ).run();
-    await stateFile.writeAsString(jsonEncode({'key': config.stateKey, ...state.toJson()}));
+    );
+    if (ifLocalChanged && !await engine.hasLocalChanges()) {
+      await _saveState(stateFile, config.stateKey, state);
+      return null;
+    }
+    final summary = await engine.run();
+    await _saveState(stateFile, config.stateKey, state);
+    await File('${dir.path}/last_check').writeAsString(DateTime.now().toIso8601String());
+    if (summary.isEmpty && summary.skipped.isEmpty) return summary.toString();
 
     var msg = summary.toString();
     if (summary.skipped.isNotEmpty) msg += ' (skipped ${summary.skipped.length} file(s) over 95 MB)';
@@ -57,6 +65,9 @@ Future<String> runSync() async {
     await lock.delete();
   }
 }
+
+Future<void> _saveState(File f, String key, SyncState state) =>
+    f.writeAsString(jsonEncode({'key': key, ...state.toJson()}));
 
 Future<SyncState> _loadState(File f, String key) async {
   if (!await f.exists()) return SyncState();
@@ -77,4 +88,9 @@ Future<void> appendLog(String message) async {
 Future<List<String>> readLog() async {
   final f = await _logFile();
   return await f.exists() ? (await f.readAsLines()).reversed.toList() : [];
+}
+
+Future<DateTime?> lastCheck() async {
+  final f = File('${(await getApplicationSupportDirectory()).path}/last_check');
+  return await f.exists() ? DateTime.tryParse(await f.readAsString()) : null;
 }

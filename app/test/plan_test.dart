@@ -54,4 +54,19 @@ void main() {
     expect(r.ignores('.trash/old.md'), isTrue);
     expect(r.ignores('notes/today.md'), isFalse);
   });
+
+  test('CommitMessage is brief, names the device and lists files', () {
+    final m = CommitMessage('phone')
+      ..modified('b.md')
+      ..added('a.md')
+      ..deleted('c.md')
+      ..added('d.md');
+    expect(m.toString(), 'phone: 2 added, 1 modified, 1 deleted\n\nA a.md\nM b.md\nD c.md\nA d.md');
+
+    final big = CommitMessage('phone');
+    for (var i = 0; i < 12; i++) {
+      big.added('n$i.md');
+    }
+    expect(big.toString().split('\n').last, '… and 2 more');
+  });
 }

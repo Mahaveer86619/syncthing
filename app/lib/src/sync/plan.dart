@@ -56,3 +56,38 @@ String conflictPath(String path, DateTime now) {
       '${two(now.hour)}${two(now.minute)}${two(now.second)}';
   return '$dir$name (conflict $stamp)$ext';
 }
+
+/// `<device>: 2 added, 1 modified` plus a short file list. The pushing GitHub account is the commit author.
+class CommitMessage {
+  CommitMessage(this.device);
+
+  static const maxListed = 10;
+
+  final String device;
+  final _counts = <String, int>{};
+  final _files = <String>[];
+
+  void added(String path) => _add('added', 'A', path);
+  void modified(String path) => _add('modified', 'M', path);
+  void deleted(String path) => _add('deleted', 'D', path);
+  void conflict(String path) => _add('conflict', 'C', path);
+
+  void _add(String kind, String code, String path) {
+    _counts[kind] = (_counts[kind] ?? 0) + 1;
+    _files.add('$code $path');
+  }
+
+  @override
+  String toString() {
+    final counts = [
+      for (final k in ['added', 'modified', 'deleted'])
+        if (_counts[k] != null) '${_counts[k]} $k',
+      if (_counts['conflict'] != null)
+        '${_counts['conflict']} conflict${_counts['conflict'] == 1 ? '' : 's'}',
+    ];
+    _files.sort((a, b) => a.substring(2).compareTo(b.substring(2)));
+    final listed = _files.take(maxListed).join('\n');
+    final more = _files.length > maxListed ? '\n… and ${_files.length - maxListed} more' : '';
+    return '$device: ${counts.join(', ')}\n\n$listed$more';
+  }
+}

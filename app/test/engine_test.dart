@@ -10,6 +10,7 @@ class FakeRemote implements RemoteRepo {
   var files = <String, String>{};
   var commits = 0;
   var rejectNextCommit = false;
+  String? lastMessage;
 
   RemoteHead get _head => RemoteHead('c$commits', 't$commits');
 
@@ -56,6 +57,7 @@ class FakeRemote implements RemoteRepo {
       return null;
     }
     if (parent.commit != _head.commit) return null;
+    lastMessage = message;
     final next = Map.of(files);
     changes.forEach((p, sha) => sha == null ? next.remove(p) : next[p] = sha);
     files = next;
@@ -90,6 +92,30 @@ void main() {
         deviceName: 'test',
         clock: () => DateTime(2026, 1, 2, 3, 4, 5),
       ).run();
+
+  SyncEngine engine() => SyncEngine(vault: vault, remote: remote, state: state, deviceName: 'test');
+
+  test('local change check needs no network and spots edits, adds and deletes', () async {
+    remote.put('a.md', '1');
+    await sync();
+    expect(await engine().hasLocalChanges(), isFalse);
+    await write('.obsidian/workspace.json', 'ignored');
+    expect(await engine().hasLocalChanges(), isFalse);
+    await write('new.md', 'x');
+    expect(await engine().hasLocalChanges(), isTrue);
+    await sync();
+    await f('a.md').delete();
+    expect(await engine().hasLocalChanges(), isTrue);
+  });
+
+  test('commit message names device and changes', () async {
+    remote.put('old.md', '1');
+    await sync();
+    await write('new.md', 'x');
+    await write('old.md', '2');
+    await sync();
+    expect(remote.lastMessage, 'test: 1 added, 1 modified\n\nA new.md\nM old.md');
+  });
 
   test('first sync merges both sides', () async {
     remote.put('from-laptop.md', 'L');

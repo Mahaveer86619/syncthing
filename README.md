@@ -10,7 +10,9 @@ Two-way sync for an [Obsidian](https://obsidian.md) vault between a Windows lapt
 ```
 
 - **`laptop-sync/`**: a PowerShell script that watches the vault, commits edits about 15 s after you stop typing, pulls remote changes every 2 min, and pushes. It runs hidden at logon with no window and idles at ~0% CPU.
-- **`app/`**: a small Flutter Android app. It syncs the phone's vault folder with the same repo through the GitHub API (no git needed on the phone). It runs as a WorkManager job every 15 min (or when you tap **Sync now**) and is not resident in memory between runs.
+- **`app/`**: a small Flutter Android app. It syncs the phone's vault folder with the same repo through the GitHub API (no git needed on the phone). With **Auto sync** on, Android wakes it right after you edit a note and every 15 min to pull laptop changes. Nothing stays resident in memory, and an idle check costs one API call or none.
+
+Every sync makes one brief commit that says who and what, e.g. `phone: 1 added, 2 modified` followed by the file list.
 
 Conflicts never lose data: if both sides edited the same note, your local version stays and the other one is saved beside it as `note (conflict 2026-10-10 153012).md`.
 
